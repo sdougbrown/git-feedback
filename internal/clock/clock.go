@@ -66,7 +66,22 @@ func (f *Fake) After(d time.Duration) <-chan time.Time {
 
 // Advance moves the fake clock forward by d, firing due timers.
 func (f *Fake) Advance(d time.Duration) {
-	f.SetTo(f.now.Add(d))
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t := f.now.Add(d)
+	if t.Before(f.now) {
+		return
+	}
+	f.now = t
+	var pending []*fakeTimer
+	for _, tm := range f.timers {
+		if !tm.deadline.After(t) {
+			tm.ch <- tm.deadline
+		} else {
+			pending = append(pending, tm)
+		}
+	}
+	f.timers = pending
 }
 
 // SetTo moves the fake clock to t, firing timers whose deadline is at or

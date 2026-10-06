@@ -48,9 +48,37 @@ func TestFingerprintExcludesVolatileFields(t *testing.T) {
 
 	// Comment body changes: fingerprint changes.
 	replied := thread
+	replied.Comments = make([]ThreadComment, len(thread.Comments))
+	copy(replied.Comments, thread.Comments)
 	replied.Comments[0].Body = "still on it"
 	if FingerprintThread(replied) == base {
 		t.Error("fingerprint did not change when a comment body changed")
+	}
+
+	// Comments supplied in reversed order: fingerprint unchanged.
+	reversed := thread
+	reversed.Comments = []ThreadComment{
+		{ID: "c2", Author: "alice", Body: "done", CreatedAt: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)},
+		{ID: "c1", Author: "bob", Body: "on it", CreatedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)},
+	}
+	if FingerprintThread(reversed) != base {
+		t.Error("fingerprint changed when comments were supplied in reversed order")
+	}
+
+	// Equal-timestamp comments: the ID tiebreak must be visible.
+	// Swapping IDs between equal-timestamp comments changes the fingerprint.
+	tieA := thread
+	tieA.Comments = []ThreadComment{
+		{ID: "a", Author: "x", Body: "hello", CreatedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{ID: "b", Author: "y", Body: "world", CreatedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)},
+	}
+	tieB := thread
+	tieB.Comments = []ThreadComment{
+		{ID: "b", Author: "x", Body: "hello", CreatedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{ID: "a", Author: "y", Body: "world", CreatedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)},
+	}
+	if FingerprintThread(tieA) == FingerprintThread(tieB) {
+		t.Error("fingerprint did not change when equal-timestamp comment IDs were swapped")
 	}
 
 	// Resolution state changes: fingerprint changes.
@@ -80,6 +108,23 @@ func TestFingerprintExcludesVolatileFields(t *testing.T) {
 	otherKind.Kind = KindReview
 	if Fingerprint(sameFields) == Fingerprint(otherKind) {
 		t.Error("fingerprint ignored the object kind")
+	}
+
+	// Pin the digest algorithm: 64 lowercase hex chars.
+	fp := Fingerprint(sameFields)
+	if len(fp) != 64 {
+		t.Fatalf("fingerprint length = %d, want 64", len(fp))
+	}
+	for i, c := range fp {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			t.Fatalf("fingerprint[%d] = %c, want lowercase hex", i, c)
+		}
+	}
+
+	// Known vector: sha256 of the canonical JSON for a minimal comment.
+	const wantFP = "60c26e4e20fee353dd277a8ef42fdec148e440e9b3c2f770e3ee4384871c797c"
+	if fp != wantFP {
+		t.Errorf("Fingerprint(sameFields) = %s, want %s", fp, wantFP)
 	}
 }
 

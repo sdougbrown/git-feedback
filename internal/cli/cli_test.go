@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -155,6 +156,12 @@ func TestEnvelopeFields(t *testing.T) {
 		}
 		if string(envelope["reviewer_completion"]) != `"unknown"` {
 			t.Errorf("%s: reviewer_completion = %s, want unknown", cmd, envelope["reviewer_completion"])
+		}
+		if string(envelope["events"]) != "[]" {
+			t.Errorf("%s: events = %s, want []", cmd, envelope["events"])
+		}
+		if string(envelope["command"]) != fmt.Sprintf("%q", cmd) {
+			t.Errorf("%s: command = %s, want %q", cmd, envelope["command"], cmd)
 		}
 		errObj := map[string]any{}
 		if err := json.Unmarshal(envelope["error"], &errObj); err != nil {
