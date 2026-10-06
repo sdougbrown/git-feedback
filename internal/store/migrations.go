@@ -58,6 +58,7 @@ func discoverMigrations() ([]migration, int, error) {
 var knownTables = []string{
 	"targets", "snapshots", "objects", "revisions",
 	"events", "acks", "observations", "leases",
+	"attempts", "schedule", "rate_gates", "http_cache",
 }
 
 // migrate applies pending embedded migrations transactionally. It refuses a
@@ -80,9 +81,10 @@ func migrate(db *sql.DB) error {
 
 	var hasVersion, hasTables int
 	if err := tx.QueryRow(
-		`SELECT (SELECT count(*) FROM schema_version), (SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN (?,?,?,?,?,?,?,?))`,
+		`SELECT (SELECT count(*) FROM schema_version), (SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN (?,?,?,?,?,?,?,?,?,?,?,?))`,
 		knownTables[0], knownTables[1], knownTables[2], knownTables[3],
 		knownTables[4], knownTables[5], knownTables[6], knownTables[7],
+		knownTables[8], knownTables[9], knownTables[10], knownTables[11],
 	).Scan(&hasVersion, &hasTables); err != nil {
 		return &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("inspect schema: %v", err)}
 	}

@@ -21,6 +21,11 @@ type PublishInput struct {
 	// Fence, when non-nil, must still be valid (token matches, unexpired per
 	// the store's clock) when the transaction commits.
 	Fence *Fence
+	// Finalize, when non-nil, runs inside the publish transaction after the
+	// pre-commit fence recheck and immediately before commit. The tracker
+	// uses it to update cadence, record the attempt, and release lease
+	// ownership atomically with the publication.
+	Finalize func(ctx context.Context, tx *sql.Tx) error
 }
 
 // PublishResult reports the outcome of one publication.
@@ -204,7 +209,7 @@ func (s *Store) Publish(ctx context.Context, in PublishInput) (PublishResult, er
 		if err := recordObservation(ctx, tx, streamID, currentID, now); err != nil {
 			return PublishResult{}, err
 		}
-		if err := s.finalize(ctx, tx, in.Fence, now); err != nil {
+		if err := s.finalize(ctx, tx, in, now); err != nil {
 			return PublishResult{}, err
 		}
 		if err := tx.Commit(); err != nil {
@@ -238,7 +243,7 @@ func (s *Store) Publish(ctx context.Context, in PublishInput) (PublishResult, er
 	if err := recordObservation(ctx, tx, streamID, snapID, now); err != nil {
 		return PublishResult{}, err
 	}
-	if err := s.finalize(ctx, tx, in.Fence, now); err != nil {
+	if err := s.finalize(ctx, tx, in, now); err != nil {
 		return PublishResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -250,15 +255,26 @@ func (s *Store) Publish(ctx context.Context, in PublishInput) (PublishResult, er
 
 // finalize runs the pre-commit seams: the BeforePublishCommit hook, then the
 // fence recheck. Any error must roll back the whole publication.
-func (s *Store) finalize(ctx context.Context, tx *sql.Tx, fence *Fence, now time.Time) error {
+// finalize runs the pre-commit seams: the BeforePublishCommit hook, the
+// fence recheck, then the caller's Finalize (cadence update and lease
+// release) immediately before commit. Running Finalize after the recheck is
+// what allows it to release lease ownership: a release inside the
+// transaction must not invalidate the fence the publication was validated
+// against. Any error must roll back the whole publication.
+func (s *Store) finalize(ctx context.Context, tx *sql.Tx, in PublishInput, now time.Time) error {
 	if s.Hooks.BeforePublishCommit != nil {
 		if err := s.Hooks.BeforePublishCommit(); err != nil {
 			return &Error{Code: CodeStore, Message: fmt.Sprintf("before-publish hook: %v", err)}
 		}
 	}
-	if fence != nil {
+	if fence := in.Fence; fence != nil {
 		if err := checkFence(ctx, tx, *fence, s.Clock.Now().UTC()); err != nil {
 			return err
+		}
+	}
+	if in.Finalize != nil {
+		if err := in.Finalize(ctx, tx); err != nil {
+			return &Error{Code: CodeStore, Message: fmt.Sprintf("publish finalize: %v", err)}
 		}
 	}
 	return nil
@@ -442,4 +458,81 @@ func (s *Store) emitEvents(ctx context.Context, tx *sql.Tx, streamID int64, in P
 		}
 	}
 	return nil
+}
+
+// SnapshotSummary describes a stream's current snapshot for result
+// envelopes: identity, collection window, feedback object counts (the
+// synthetic target object is excluded), and the last successful complete
+// observation time for the snapshot.
+type SnapshotSummary struct {
+	ID             string
+	Head           string
+	CollectedStart time.Time
+	CollectedEnd   time.Time
+	Threads        int
+	Reviews        int
+	Comments       int
+	ObservedAt     time.Time
+}
+
+// CurrentSnapshot returns the current snapshot summary for one stream, or
+// false when the stream has no snapshot (or does not exist).
+func (s *Store) CurrentSnapshot(ctx context.Context, targetID, account string) (SnapshotSummary, bool, error) {
+	var sum SnapshotSummary
+	var streamID, snapID int64
+	var start, end, observedAt sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT t.stream_id, s.id, s.head, s.collected_start, s.collected_end,
+		       (SELECT MAX(o.observed_at) FROM observations o
+		         WHERE o.stream_id = t.stream_id AND o.snapshot_id = s.id)
+		FROM targets t JOIN snapshots s ON s.id = t.current_snapshot_id
+		WHERE t.target_id = ? AND t.account = ?`,
+		targetID, forge.CanonicalAccount(account)).Scan(
+		&streamID, &snapID, &sum.Head, &start, &end, &observedAt)
+	if err == sql.ErrNoRows {
+		return SnapshotSummary{}, false, nil
+	}
+	if err != nil {
+		return SnapshotSummary{}, false, &Error{Code: CodeStore, Message: fmt.Sprintf("read current snapshot: %v", err)}
+	}
+	stamps := []struct {
+		col string
+		dst *time.Time
+	}{{start.String, &sum.CollectedStart}, {end.String, &sum.CollectedEnd}, {observedAt.String, &sum.ObservedAt}}
+	for _, st := range stamps {
+		if st.col == "" {
+			continue
+		}
+		if *st.dst, err = time.Parse(time.RFC3339Nano, st.col); err != nil {
+			return SnapshotSummary{}, false, &Error{Code: CodeStoreCorrupt, Message: "unparseable snapshot timestamps"}
+		}
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT kind, count(*) FROM objects
+		 WHERE stream_id = ? AND present = 1 AND kind IN ('thread', 'review', 'comment')
+		 GROUP BY kind`, streamID)
+	if err != nil {
+		return SnapshotSummary{}, false, &Error{Code: CodeStore, Message: fmt.Sprintf("count objects: %v", err)}
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind string
+		var n int
+		if err := rows.Scan(&kind, &n); err != nil {
+			return SnapshotSummary{}, false, &Error{Code: CodeStore, Message: fmt.Sprintf("count objects: %v", err)}
+		}
+		switch forge.Kind(kind) {
+		case forge.KindThread:
+			sum.Threads = n
+		case forge.KindReview:
+			sum.Reviews = n
+		case forge.KindComment:
+			sum.Comments = n
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return SnapshotSummary{}, false, &Error{Code: CodeStore, Message: fmt.Sprintf("count objects: %v", err)}
+	}
+	sum.ID = formatSnapshotID(snapID)
+	return sum, true, nil
 }

@@ -7,6 +7,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -28,6 +29,7 @@ const (
 	CodeInvalidLimit       = "invalid_limit"
 	CodeInvalidInput       = "invalid_input"
 	CodeFenceLost          = "fence_lost"
+	CodeLeaseBusy          = "lease_busy"
 	CodeDestinationExists  = "destination_exists"
 	CodeExportStateDir     = "export_state_dir"
 	CodeExportUnsupported  = "export_unsupported"
@@ -94,6 +96,60 @@ func Open(stateDir string, opts Options) (*Store, error) {
 		clk = clock.Real{}
 	}
 	return &Store{db: db, Clock: clk}, nil
+}
+
+// StreamID returns the internal stream id for (target, account), or false
+// when no stream exists.
+func (s *Store) StreamID(ctx context.Context, targetID, account string) (int64, bool, error) {
+	var streamID int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT stream_id FROM targets WHERE target_id = ? AND account = ?`,
+		targetID, forge.CanonicalAccount(account)).Scan(&streamID)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, &Error{Code: CodeStore, Message: fmt.Sprintf("resolve stream: %v", err)}
+	}
+	return streamID, true, nil
+}
+
+// TargetInfo returns the stored target record for a public target ID.
+func (s *Store) TargetInfo(ctx context.Context, targetID string) (forge.Target, bool, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT target_json FROM targets WHERE target_id = ? LIMIT 1`, targetID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return forge.Target{}, false, nil
+	}
+	if err != nil {
+		return forge.Target{}, false, &Error{Code: CodeStore, Message: fmt.Sprintf("read target: %v", err)}
+	}
+	var t forge.Target
+	if err := json.Unmarshal([]byte(raw), &t); err != nil {
+		return forge.Target{}, false, &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("decode target: %v", err)}
+	}
+	return t, true, nil
+}
+
+// AccountsForTarget returns the canonical accounts that have a stream for
+// the target, ordered ascending.
+func (s *Store) AccountsForTarget(ctx context.Context, targetID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT account FROM targets WHERE target_id = ? ORDER BY account`, targetID)
+	if err != nil {
+		return nil, &Error{Code: CodeStore, Message: fmt.Sprintf("read accounts: %v", err)}
+	}
+	defer rows.Close()
+	var accounts []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, &Error{Code: CodeStore, Message: fmt.Sprintf("read accounts: %v", err)}
+		}
+		accounts = append(accounts, a)
+	}
+	return accounts, rows.Err()
 }
 
 // Close releases the database.
