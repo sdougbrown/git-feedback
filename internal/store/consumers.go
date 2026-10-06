@@ -153,18 +153,15 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 	events := make([]Event, 0, limit)
 	for rows.Next() {
 		var ev Event
-		var observedAt, snapSeq string
+		var observedAt string
+		var snapSeq int64
 		var headBefore, headAfter sql.NullString
 		if err := rows.Scan(&ev.Seq, &ev.Kind, &ev.ObjectKind, &ev.ObjectID, &ev.Revision,
 			&ev.URL, &snapSeq, &observedAt, &headBefore, &headAfter); err != nil {
 			return InboxResult{}, &Error{Code: CodeStore, Message: fmt.Sprintf("read inbox: %v", err)}
 		}
-		seq, ok := parseSnapshotID(snapSeq)
-		if !ok {
-			return InboxResult{}, &Error{Code: CodeStoreCorrupt, Message: "unparseable snapshot reference in events"}
-		}
 		ev.ID = formatEventID(ev.Seq)
-		ev.SnapshotID = formatSnapshotID(seq)
+		ev.SnapshotID = formatSnapshotID(snapSeq)
 		if ev.ObservedAt, err = time.Parse(time.RFC3339Nano, observedAt); err != nil {
 			return InboxResult{}, &Error{Code: CodeStoreCorrupt, Message: "unparseable observed_at in events"}
 		}
