@@ -1,0 +1,363 @@
+package integration
+
+import (
+	"encoding/json"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+const consumer = "ci"
+
+// testState returns a fresh state directory for one test.
+func testState(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), "state")
+}
+
+// reconcileArgs builds the reconcile argv for the test target.
+func reconcileArgs(dir string) []string {
+	return append([]string{"reconcile", testURL, "--json"}, stateArg(dir)...)
+}
+
+// waitArgs builds the wait argv for the test target with the given flags.
+func waitArgs(dir string, flags ...string) []string {
+	return append([]string{"wait", testURL, "--consumer", consumer, "--json"}, append(flags, stateArg(dir)...)...)
+}
+
+// inboxArgs builds the inbox argv for the test target.
+func inboxArgs(dir string) []string {
+	return append([]string{"inbox", testURL, "--consumer", consumer, "--json"}, stateArg(dir)...)
+}
+
+// ackArgs builds the ack argv for one event ID.
+func ackArgs(dir, id string) []string {
+	return append([]string{"ack", testURL, "--consumer", consumer, "--event", id, "--json"}, stateArg(dir)...)
+}
+
+// assertStatusUpdated fails unless the envelope reports an updated publish.
+func assertStatusUpdated(t *testing.T, env map[string]json.RawMessage) {
+	t.Helper()
+	if s := statusOf(t, env); s != "updated" {
+		t.Fatalf("reconcile status = %q, want updated", s)
+	}
+}
+
+// seedPublished runs one reconcile against the stub, requiring a publish.
+func seedPublished(t *testing.T, env []string, dir string) {
+	t.Helper()
+	assertStatusUpdated(t, runOK(t, env, 90*time.Second, reconcileArgs(dir)...))
+}
+
+// ackAll acknowledges every currently pending event for the consumer.
+func ackAll(t *testing.T, env []string, dir string) {
+	t.Helper()
+	page := runOK(t, env, 30*time.Second, inboxArgs(dir)...)
+	for _, id := range eventIDs(t, page) {
+		runOK(t, env, 30*time.Second, ackArgs(dir, id)...)
+	}
+}
+
+// snapshotCounts copies the stub's request counters.
+func snapshotCounts(stub *ghStub) map[string]int {
+	return map[string]int{
+		"verify":   stub.count("verify"),
+		"head":     stub.count("head"),
+		"threads":  stub.count("threads"),
+		"reviews":  stub.count("reviews"),
+		"comments": stub.count("comments"),
+	}
+}
+
+// assertNoRequests fails when any counted endpoint received new requests
+// since the baseline, proving the command stayed offline.
+func assertNoRequests(t *testing.T, stub *ghStub, before map[string]int) {
+	t.Helper()
+	for key, n := range before {
+		if got := stub.count(key); got != n {
+			t.Fatalf("endpoint %q received %d requests after baseline %d; command touched the network", key, got, n)
+		}
+	}
+}
+
+// TestWaitColdStart: an empty store with no stored account never guesses.
+// The first cycle bootstraps, verifies, collects, and publishes; the
+// initial observation is delivered as pending events.
+func TestWaitColdStart(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, nil)
+	dir := testState(t)
+
+	envOut := runOK(t, env, 90*time.Second, waitArgs(dir, "--timeout", "60s")...)
+	if s := statusOf(t, envOut); s != "events" {
+		t.Fatalf("wait status = %q, want events", s)
+	}
+	kinds := eventKinds(t, envOut)
+	if len(kinds) == 0 {
+		t.Fatalf("wait delivered no events")
+	}
+	for _, k := range kinds {
+		if k != "initial_observation" {
+			t.Fatalf("event kinds = %v, want initial observations", kinds)
+		}
+	}
+	if acct := stringField(t, envOut, "account"); acct != "alice" {
+		t.Fatalf("account = %q, want alice", acct)
+	}
+	if !nonNull(envOut, "snapshot") {
+		t.Fatalf("wait on cold start delivered no snapshot")
+	}
+}
+
+// TestPinnedWaitDeliversHistoricalBacklog: pending events are returned
+// immediately without remote authentication; the stored observed head and
+// the requested expected head travel with stale set on mismatch.
+func TestPinnedWaitDeliversHistoricalBacklog(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, nil)
+	dir := testState(t)
+	seedPublished(t, env, dir)
+
+	before := snapshotCounts(stub)
+	envOut := runOK(t, env, 30*time.Second, waitArgs(dir, "--head", "pinhead", "--timeout", "5s")...)
+	assertNoRequests(t, stub, before)
+
+	if s := statusOf(t, envOut); s != "events" {
+		t.Fatalf("wait status = %q, want events", s)
+	}
+	if head := stringField(t, envOut, "observed_head"); head != "h1" {
+		t.Fatalf("observed_head = %q, want h1", head)
+	}
+	if head := stringField(t, envOut, "expected_head"); head != "pinhead" {
+		t.Fatalf("expected_head = %q, want pinhead", head)
+	}
+	if !staleField(t, envOut) {
+		t.Fatalf("stale = false, want true when the stored head differs from --head")
+	}
+	if ids := eventIDs(t, envOut); len(ids) == 0 {
+		t.Fatalf("wait delivered no events")
+	}
+}
+
+// TestLostOutputReplays: dropping the first process's entire result still
+// lets a second process receive the same event, delivered offline from the
+// stored backlog.
+func TestLostOutputReplays(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, nil)
+	dir := testState(t)
+
+	// The first process's output is dropped entirely.
+	seedPublished(t, env, dir)
+
+	before := snapshotCounts(stub)
+	envOut := runOK(t, env, 30*time.Second, waitArgs(dir, "--timeout", "5s")...)
+	assertNoRequests(t, stub, before)
+
+	if s := statusOf(t, envOut); s != "events" {
+		t.Fatalf("wait status = %q, want events", s)
+	}
+	if ids := eventIDs(t, envOut); len(ids) == 0 {
+		t.Fatalf("second process received no events; the dropped output was not replayable")
+	}
+}
+
+// TestHeadOnlyChangeLostOutputReplays: after the earlier event is acked, a
+// later head-only revision stays pending and is delivered to the next
+// process even when the publishing process's output was lost.
+func TestHeadOnlyChangeLostOutputReplays(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, map[string]string{"GIT_FEEDBACK_MIN_INTERVAL": "100ms"})
+	dir := testState(t)
+
+	seedPublished(t, env, dir)
+	ackAll(t, env, dir)
+
+	// A head-only change publishes the revision; its output is dropped.
+	stub.setHead("h2")
+	assertStatusUpdated(t, runOK(t, env, 90*time.Second, reconcileArgs(dir)...))
+
+	envOut := runOK(t, env, 30*time.Second, waitArgs(dir, "--timeout", "5s")...)
+	if s := statusOf(t, envOut); s != "events" {
+		t.Fatalf("wait status = %q, want events", s)
+	}
+	kinds := eventKinds(t, envOut)
+	if len(kinds) != 1 || kinds[0] != "head_changed" {
+		t.Fatalf("event kinds = %v, want [head_changed] (the later revision stays pending after the ack)", kinds)
+	}
+	if head := stringField(t, envOut, "observed_head"); head != "h2" {
+		t.Fatalf("observed_head = %q, want h2", head)
+	}
+}
+
+// TestWaitDoesNotAck: delivery is not acknowledgement; a second read of the
+// same inbox still returns the same pending events.
+func TestWaitDoesNotAck(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, nil)
+	dir := testState(t)
+	seedPublished(t, env, dir)
+
+	envOut := runOK(t, env, 30*time.Second, waitArgs(dir, "--timeout", "5s")...)
+	if s := statusOf(t, envOut); s != "events" {
+		t.Fatalf("wait status = %q, want events", s)
+	}
+	delivered := eventIDs(t, envOut)
+	if len(delivered) == 0 {
+		t.Fatalf("wait delivered no events")
+	}
+	page := runOK(t, env, 30*time.Second, inboxArgs(dir)...)
+	if again := eventIDs(t, page); len(again) != len(delivered) {
+		t.Fatalf("inbox after wait has %d pending events, want %d: wait acknowledged delivery", len(again), len(delivered))
+	}
+}
+
+// TestWaitFatalOnHeadMismatch: with --head and no pending backlog, a pinned
+// head mismatch ends the wait immediately with both heads and no collection.
+func TestWaitFatalOnHeadMismatch(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, map[string]string{"GIT_FEEDBACK_MIN_INTERVAL": "100ms"})
+	dir := testState(t)
+	seedPublished(t, env, dir)
+	ackAll(t, env, dir)
+
+	beforeThreads := stub.count("threads")
+	beforeHead := stub.count("head")
+	envOut := runOK(t, env, 30*time.Second, waitArgs(dir, "--head", "deadbeef", "--timeout", "10s")...)
+
+	if s := statusOf(t, envOut); s != "head_changed" {
+		t.Fatalf("wait status = %q, want head_changed", s)
+	}
+	if head := stringField(t, envOut, "observed_head"); head != "h1" {
+		t.Fatalf("observed_head = %q, want h1", head)
+	}
+	if head := stringField(t, envOut, "expected_head"); head != "deadbeef" {
+		t.Fatalf("expected_head = %q, want deadbeef", head)
+	}
+	if got := stub.count("threads"); got != beforeThreads {
+		t.Fatalf("threads requests = %d, want %d: mismatch must not collect feedback", got, beforeThreads)
+	}
+	if got := stub.count("head"); got != beforeHead+1 {
+		t.Fatalf("head requests = %d, want %d: exactly the pinned-head check", got, beforeHead+1)
+	}
+}
+
+// TestWaitDeadlineBoundsAllWork: a wait with a 2s deadline against a hanging
+// remote exits promptly with the timeout status, not a hang.
+func TestWaitDeadlineBoundsAllWork(t *testing.T) {
+	stub := newStub(t)
+	release := stub.hangVerification()
+	t.Cleanup(func() { close(release) })
+	env := testEnv(fakeGHPath(t), stub.srv.URL, nil)
+	dir := testState(t)
+
+	start := time.Now()
+	envOut := runOK(t, env, 10*time.Second, waitArgs(dir, "--timeout", "2s")...)
+	elapsed := time.Since(start)
+
+	if s := statusOf(t, envOut); s != "timeout" {
+		t.Fatalf("wait status = %q, want timeout", s)
+	}
+	if elapsed > 3500*time.Millisecond {
+		t.Fatalf("wait with a 2s deadline exited after %v, want under ~3s", elapsed)
+	}
+}
+
+// TestWaitDeadlineWhileStoreBusy: a second process holding the SQLite write
+// lock cannot hold the wait past its deadline; lock waits are bounded by
+// the remaining deadline, not the default 5000ms alone.
+func TestWaitDeadlineWhileStoreBusy(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, nil)
+	dir := testState(t)
+
+	// Initialize the store schema before taking the write lock so the wait
+	// fails only on lock contention, not on a blocked migration.
+	initStore(t, env, dir)
+
+	// Hold a write transaction on the store's database for the whole run.
+	lock := holdWriteLock(t, dir)
+	defer lock()
+
+	start := time.Now()
+	envOut := runOK(t, env, 10*time.Second, waitArgs(dir, "--timeout", "2s")...)
+	elapsed := time.Since(start)
+
+	if s := statusOf(t, envOut); s != "timeout" {
+		t.Fatalf("wait status = %q, want timeout (stderr has no bearing)", s)
+	}
+	if elapsed > 3500*time.Millisecond {
+		t.Fatalf("wait under a busy store exited after %v, want under ~3s", elapsed)
+	}
+}
+
+// TestWaitUsesSharedCadence: repeated wait cycles honor the persisted
+// cadence (no busy-looping) and reuse the verified session instead of
+// re-admitting per cycle.
+func TestWaitUsesSharedCadence(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, map[string]string{"GIT_FEEDBACK_MIN_INTERVAL": "2s"})
+	dir := testState(t)
+	seedPublished(t, env, dir)
+	ackAll(t, env, dir)
+
+	before := snapshotCounts(stub)
+	envOut := runOK(t, env, 90*time.Second, waitArgs(dir, "--timeout", "15s")...)
+	if s := statusOf(t, envOut); s != "timeout" {
+		t.Fatalf("wait status = %q, want timeout", s)
+	}
+	// One verification for the wait's own first cycle (the seed's is
+	// separate) and at most three wait collections in a 15s window at a
+	// 2s cadence: a busy loop would show dozens.
+	if got := stub.count("verify") - before["verify"]; got != 1 {
+		t.Fatalf("wait verify requests = %d, want 1: cycles re-authenticated (timeline: %v)", got, timeline(t, stub))
+	}
+	if got := stub.count("threads") - before["threads"]; got < 1 || got > 3 {
+		t.Fatalf("wait collections = %d, want 1–3: cadence not honored (timeline: %v)", got, timeline(t, stub))
+	}
+}
+
+// TestWaitReusesVerifiedSession: the wait's first cycle verifies once; every
+// later cycle in the same invocation collects without re-verifying.
+func TestWaitReusesVerifiedSession(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, map[string]string{"GIT_FEEDBACK_MIN_INTERVAL": "2s"})
+	dir := testState(t)
+	seedPublished(t, env, dir)
+	ackAll(t, env, dir)
+
+	before := snapshotCounts(stub)
+	envOut := runOK(t, env, 90*time.Second, waitArgs(dir, "--timeout", "14s")...)
+	if s := statusOf(t, envOut); s != "timeout" {
+		t.Fatalf("wait status = %q, want timeout", s)
+	}
+	if got := stub.count("verify") - before["verify"]; got != 1 {
+		t.Fatalf("wait verification requests = %d, want exactly 1 across all cycles (counts: %v)", got, snapshotCounts(stub))
+	}
+	if got := stub.count("threads") - before["threads"]; got < 2 {
+		t.Fatalf("wait completed %d collections, want at least 2 (the second reusing the session) (counts: %v)", got, snapshotCounts(stub))
+	}
+}
+
+// TestWaitHonorsPersistedRateGate: a persisted GraphQL gate blocks even the
+// viewer verification of a fresh caller; wait retries until the deadline
+// without issuing a single GraphQL request.
+func TestWaitHonorsPersistedRateGate(t *testing.T) {
+	stub := newStub(t)
+	stub.rateRemaining = 5
+	stub.rateReset = time.Now().Add(time.Hour)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, nil)
+	dir := testState(t)
+
+	// A reconcile persists the exhausted gate (and defers); it collects
+	// nothing.
+	runOK(t, env, 30*time.Second, reconcileArgs(dir)...)
+
+	before := snapshotCounts(stub)
+	envOut := runOK(t, env, 30*time.Second, waitArgs(dir, "--timeout", "2s")...)
+	assertNoRequests(t, stub, before)
+
+	if s := statusOf(t, envOut); s != "timeout" {
+		t.Fatalf("wait status = %q, want timeout", s)
+	}
+}

@@ -25,13 +25,12 @@ const MaxCycleBound = 90 * time.Second
 // Lease re-acquisition issues no GitHub requests.
 const busyRetryBackoff = time.Second
 
-// clock resolves the engine's clock with the real default.
-func (e *Engine) clock() clock.Clock {
-	if e.Clock == nil {
-		return clock.Real{}
-	}
-	return e.Clock
-}
+// storeRetryBackoff is how long a transient store-access failure sleeps
+// before the wait retries the store.
+const storeRetryBackoff = 100 * time.Millisecond
+
+// errTransientStore marks a retriable store-access failure inside wait.
+var errTransientStore = errors.New("tracker: transient store contention")
 
 // WaitInput selects what wait waits for.
 type WaitInput struct {
@@ -71,10 +70,11 @@ type WaitResult struct {
 	NextCursor string
 }
 
-// OpenStore, when set, opens a store whose SQLite lock waits are bounded by
-// the given duration. Wait opens one store for the backlog pre-check and
-// reopens it per cycle so lock waits never exceed the remaining deadline.
-// Nil reuses the engine's store for every cycle.
+// OpenStore, when set, opens the invocation's store with its SQLite lock
+// waits bounded by the given duration; wait clamps it to the remaining
+// command deadline. The same store serves every cycle, because a reused
+// session's transport is bound to the store-backed services opened with it.
+// Nil reuses the engine's store.
 type OpenStore func(busy time.Duration) (*store.Store, error)
 
 // Wait delivers pending events for the consumer, running the shared
@@ -89,7 +89,7 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 	}
 	clk := e.clock()
 
-	eng, closeStore, err := e.storeFor(clk, remainingOf(ctx))
+	eng, closeStore, err := e.openStoreResilient(ctx, clk, remainingOf(ctx))
 	if err != nil {
 		return WaitResult{}, err
 	}
@@ -100,8 +100,8 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 	account := forge.CanonicalAccount(in.Account)
 	if account == "" {
 		accounts, aerr := eng.Store.AccountsForTarget(ctx, target.ID)
-		if aerr != nil {
-			return WaitResult{}, err
+		if aerr != nil && !isStoreOpenError(aerr) {
+			return WaitResult{}, aerr
 		}
 		if len(accounts) == 1 {
 			account = accounts[0]
@@ -116,10 +116,11 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 		// Inbox check: no authentication, no GitHub requests.
 		if account != "" {
 			res, done, err := e.backlog(ctx, eng, target, account, in)
-			if err != nil {
+			switch {
+			case errors.Is(err, errTransientStore):
+			case err != nil:
 				return WaitResult{}, err
-			}
-			if done {
+			case done:
 				return res, nil
 			}
 		}
@@ -128,28 +129,31 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 		if remaining <= 0 {
 			return e.timeoutResult(eng, target, account, in, lastAttempt), nil
 		}
-		// One shared-engine cycle, bounded by min(90s, remaining).
+		// One shared-engine cycle, bounded by min(90s, remaining). The
+		// store is shared across cycles because the reused session's
+		// transport is bound to the store-backed services opened here.
 		cycle, cancel := context.WithTimeout(ctx, min(MaxCycleBound, remaining))
-		cycleEng, closeCycle, err := e.storeFor(clk, remainingOf(cycle))
-		if err != nil {
-			cancel()
-			return WaitResult{}, err
-		}
-		res, rerr := cycleEng.Reconcile(cycle, ReconcileInput{
+		res, rerr := eng.Reconcile(cycle, ReconcileInput{
 			URL:     in.URL,
 			Head:    in.Head,
 			Account: in.Account,
 			Session: session,
 		})
+		// Capture the cycle's own cancellation before cancel() overwrites
+		// it: a cycle cut by its bound is transient, never a fatal error.
+		cycleCut := cycle.Err() != nil
+		deadlineCut := ctx.Err() != nil
 		cancel()
-		lastAttempt = attemptOf(res, cycleEng, target, account, lastAttempt)
-		closeCycle()
+		lastAttempt = attemptOf(res, eng, target, account, lastAttempt)
 
 		if rerr != nil {
-			if fatalWaitError(rerr) || ctx.Err() != nil {
-				if !fatalWaitError(rerr) {
-					return e.timeoutResult(eng, target, account, in, lastAttempt), nil
-				}
+			switch {
+			case deadlineCut:
+				// The overall deadline cut the cycle short.
+				return e.timeoutResult(eng, target, account, in, lastAttempt), nil
+			case cycleCut:
+				// The remote hung past the cycle bound: retry on cadence.
+			case fatalWaitError(rerr):
 				return WaitResult{}, rerr
 			}
 			// Transient failure: the engine recorded the next attempt on
@@ -169,15 +173,16 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 		// Events may exist now even if the cycle changed nothing.
 		if account != "" {
 			res, done, err := e.backlog(ctx, eng, target, account, in)
-			if err != nil {
+			switch {
+			case errors.Is(err, errTransientStore):
+			case err != nil:
 				return WaitResult{}, err
-			}
-			if done {
+			case done:
 				return res, nil
 			}
 		}
 
-		if err := e.sleepUntil(ctx, clk, wakeTime(res, rerr, eng)); err != nil {
+		if serr := e.sleepUntil(ctx, clk, wakeTime(res, rerr, eng)); serr != nil {
 			return e.timeoutResult(eng, target, account, in, lastAttempt), nil
 		}
 	}
@@ -185,17 +190,18 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 
 // attemptOf captures the latest attempt for the timeout result: the cycle's
 // own recorded attempt, or the store's latest attempt for the stream.
-func attemptOf(res Result, cycleEng *Engine, target forge.Target, account string, prev *store.Attempt) *store.Attempt {
+func attemptOf(res Result, eng *Engine, target forge.Target, account string, prev *store.Attempt) *store.Attempt {
 	if res.Attempt != nil {
 		return res.Attempt
 	}
-	if !res.HasAccount || res.Account == "" {
-		if account == "" {
-			return prev
-		}
-		res.Account = account
+	who := account
+	if res.HasAccount && res.Account != "" {
+		who = res.Account
 	}
-	if att, ok, err := cycleEng.Store.LatestAttempt(context.Background(), target.ID, res.Account); err == nil && ok {
+	if who == "" {
+		return prev
+	}
+	if att, ok, err := eng.Store.LatestAttempt(context.Background(), target.ID, who); err == nil && ok {
 		return &att
 	}
 	return prev
@@ -230,7 +236,8 @@ func wakeTime(res Result, rerr error, eng *Engine) time.Time {
 
 // backlog returns the pending page for (target, account, consumer) without
 // any remote access. done is false when the stream has no pending events or
-// does not exist yet.
+// does not exist yet. A transient store failure surfaces as
+// errTransientStore so the loop retries it until the deadline.
 func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, account string, in WaitInput) (WaitResult, bool, error) {
 	page, err := eng.Store.Inbox(ctx, store.InboxInput{
 		TargetID: target.ID,
@@ -243,6 +250,9 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 		if errors.As(err, &se) && se.Code == store.CodeUnknownStream {
 			return WaitResult{}, false, nil
 		}
+		if isStoreOpenError(err) {
+			return WaitResult{}, false, errTransientStore
+		}
 		return WaitResult{}, false, err
 	}
 	if len(page.Events) == 0 {
@@ -250,6 +260,9 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 	}
 	sum, ok, err := eng.Store.CurrentSnapshot(ctx, target.ID, account)
 	if err != nil {
+		if isStoreOpenError(err) {
+			return WaitResult{}, false, errTransientStore
+		}
 		return WaitResult{}, false, err
 	}
 	res := WaitResult{
@@ -275,6 +288,23 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 		res.Freshness.Stale = ok && !sum.ObservedAt.IsZero() && e.clock().Now().Sub(sum.ObservedAt) > min
 	}
 	return res, true, nil
+}
+
+// openStoreResilient opens the invocation's store, retrying transient open
+// failures (concurrent access) until the deadline.
+func (e *Engine) openStoreResilient(ctx context.Context, clk clock.Clock, remaining time.Duration) (*Engine, func(), error) {
+	for {
+		eng, closeStore, err := e.storeFor(clk, remaining)
+		if err == nil {
+			return eng, closeStore, nil
+		}
+		if !isStoreOpenError(err) {
+			return nil, nil, err
+		}
+		if serr := e.sleepUntil(ctx, clk, clk.Now().Add(storeRetryBackoff)); serr != nil {
+			return nil, nil, serr
+		}
+	}
 }
 
 // waitHeadChanged maps a fatal pinned-head mismatch onto the wait result.
@@ -327,9 +357,17 @@ func (e *Engine) sleepUntil(ctx context.Context, clk clock.Clock, wake time.Time
 	}
 }
 
+// clock resolves the engine's clock with the real default.
+func (e *Engine) clock() clock.Clock {
+	if e.Clock == nil {
+		return clock.Real{}
+	}
+	return e.Clock
+}
+
 // storeFor binds an engine copy to a store whose SQLite lock waits are
-// bounded by the remaining deadline (clamped to the pinned 5s ceiling).
-// A nil OpenStore reuses the engine's store for every cycle.
+// bounded by the given duration (clamped to the pinned 5s ceiling).
+// A nil OpenStore reuses the engine's store.
 func (e *Engine) storeFor(clk clock.Clock, remaining time.Duration) (*Engine, func(), error) {
 	if e.OpenStore == nil {
 		if e.Store == nil {
@@ -371,6 +409,13 @@ func remainingOf(ctx context.Context) time.Duration {
 		return 0
 	}
 	return d
+}
+
+// isStoreOpenError reports whether err is the store's open/integrity
+// failure, which is transient under concurrent access.
+func isStoreOpenError(err error) bool {
+	var se *store.Error
+	return errors.As(err, &se) && (se.Code == store.CodeStore || se.Code == store.CodeStoreCorrupt)
 }
 
 // fatalWaitError reports whether one reconciliation failure must end the
