@@ -71,19 +71,19 @@ var commonFlags = []flagSpec{
 var specs = map[string]commandSpec{
 	"reconcile": {
 		flags:  []flagSpec{{"head", flagString}},
-		handle: handleNotImplemented,
+		handle: handleReconcile,
 	},
 	"snapshot": {
 		flags:  []flagSpec{{"snapshot", flagString}, {"output", flagString}},
-		handle: handleNotImplemented,
+		handle: handleSnapshot,
 	},
 	"inbox": {
 		flags:  []flagSpec{{"consumer", flagString}, {"limit", flagString}, {"after", flagString}},
-		handle: handleNotImplemented,
+		handle: handleInbox,
 	},
 	"ack": {
 		flags:  []flagSpec{{"consumer", flagString}, {"event", flagRepeat}},
-		handle: handleNotImplemented,
+		handle: handleAck,
 	},
 	"wait": {
 		flags:  []flagSpec{{"consumer", flagString}, {"timeout", flagString}, {"head", flagString}, {"limit", flagString}},
@@ -226,6 +226,10 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		return ExitOperational
 	}
 	if result.Error != nil {
+		var ue *usageError
+		if errors.As(herr, &ue) {
+			return ExitUsage
+		}
 		return ExitOperational
 	}
 	return ExitOK

@@ -124,57 +124,67 @@ func TestDispatchUsageErrorsExit2(t *testing.T) {
 
 func TestEnvelopeFields(t *testing.T) {
 	// Every command must emit every contract field, including
-	// reviewer_completion "unknown", before handlers are implemented.
-	for _, cmd := range []string{"reconcile", "snapshot", "inbox", "ack", "wait"} {
-		argv := []string{cmd, "https://github.com/o/r/pull/1"}
-		switch cmd {
-		case "snapshot":
-			argv = []string{cmd, "--snapshot", "s1", "--output", "/tmp/x", "https://github.com/o/r/pull/1"}
-		case "ack":
-			argv = []string{cmd, "--event", "e1", "https://github.com/o/r/pull/1"}
-		}
-		var stdout bytes.Buffer
-		code := Run(argv, &stdout, &bytes.Buffer{})
-		if code != 1 {
-			t.Fatalf("%s: exit code = %d, want 1 (not_implemented)", cmd, code)
-		}
-		var envelope map[string]json.RawMessage
-		if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
-			t.Fatalf("%s: %v", cmd, err)
-		}
-		for _, key := range []string{
-			"schema", "command", "status", "target", "account", "observed_head",
-			"expected_head", "snapshot", "attempt", "freshness", "reviewer_completion",
-			"events", "has_more", "next_cursor", "export", "error",
-		} {
-			if _, ok := envelope[key]; !ok {
-				t.Errorf("%s: missing contract field %q", cmd, key)
+	// reviewer_completion "unknown". Implemented commands fail here before
+	// any network access: reconcile on an unsupported host, the local
+	// commands on a store with no initialized stream. wait remains the
+	// Stage 1 placeholder.
+	base := t.TempDir()
+	tests := []struct {
+		name string
+		argv []string
+		code string
+	}{
+		{"reconcile", []string{"reconcile", "--state-dir", base, "https://gitlab.com/o/r/pull/1"}, "unsupported_host"},
+		{"snapshot", []string{"snapshot", "--snapshot", "s1", "--output", "/tmp/x", "--state-dir", base, "https://github.com/o/r/pull/1"}, "unknown_stream"},
+		{"inbox", []string{"inbox", "--consumer", "ci", "--state-dir", base, "https://github.com/o/r/pull/1"}, "unknown_stream"},
+		{"ack", []string{"ack", "--consumer", "ci", "--event", "e1", "--state-dir", base, "https://github.com/o/r/pull/1"}, "unknown_stream"},
+		{"wait", []string{"wait", "https://github.com/o/r/pull/1"}, "not_implemented"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			code := Run(tc.argv, &stdout, &bytes.Buffer{})
+			if code != 1 {
+				t.Fatalf("%s: exit code = %d, want 1", tc.name, code)
 			}
-		}
-		if string(envelope["schema"]) != `"git-feedback/v1"` {
-			t.Errorf("%s: schema = %s", cmd, envelope["schema"])
-		}
-		if string(envelope["reviewer_completion"]) != `"unknown"` {
-			t.Errorf("%s: reviewer_completion = %s, want unknown", cmd, envelope["reviewer_completion"])
-		}
-		if string(envelope["events"]) != "[]" {
-			t.Errorf("%s: events = %s, want []", cmd, envelope["events"])
-		}
-		if string(envelope["command"]) != fmt.Sprintf("%q", cmd) {
-			t.Errorf("%s: command = %s, want %q", cmd, envelope["command"], cmd)
-		}
-		errObj := map[string]any{}
-		if err := json.Unmarshal(envelope["error"], &errObj); err != nil {
-			t.Fatalf("%s: error field: %v", cmd, err)
-		}
-		if errObj["code"] != "not_implemented" {
-			t.Errorf("%s: error.code = %v, want not_implemented", cmd, errObj["code"])
-		}
-		for _, key := range []string{"code", "message", "retryable"} {
-			if _, ok := errObj[key]; !ok {
-				t.Errorf("%s: error missing field %q", cmd, key)
+			var envelope map[string]json.RawMessage
+			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
 			}
-		}
+			for _, key := range []string{
+				"schema", "command", "status", "target", "account", "observed_head",
+				"expected_head", "snapshot", "attempt", "freshness", "reviewer_completion",
+				"events", "has_more", "next_cursor", "export", "error",
+			} {
+				if _, ok := envelope[key]; !ok {
+					t.Errorf("%s: missing contract field %q", tc.name, key)
+				}
+			}
+			if string(envelope["schema"]) != `"git-feedback/v1"` {
+				t.Errorf("%s: schema = %s", tc.name, envelope["schema"])
+			}
+			if string(envelope["reviewer_completion"]) != `"unknown"` {
+				t.Errorf("%s: reviewer_completion = %s, want unknown", tc.name, envelope["reviewer_completion"])
+			}
+			if string(envelope["events"]) != "[]" {
+				t.Errorf("%s: events = %s, want []", tc.name, envelope["events"])
+			}
+			if string(envelope["command"]) != fmt.Sprintf("%q", tc.name) {
+				t.Errorf("%s: command = %s, want %q", tc.name, envelope["command"], tc.name)
+			}
+			errObj := map[string]any{}
+			if err := json.Unmarshal(envelope["error"], &errObj); err != nil {
+				t.Fatalf("%s: error field: %v", tc.name, err)
+			}
+			if errObj["code"] != tc.code {
+				t.Errorf("%s: error.code = %v, want %s", tc.name, errObj["code"], tc.code)
+			}
+			for _, key := range []string{"code", "message", "retryable"} {
+				if _, ok := errObj[key]; !ok {
+					t.Errorf("%s: error missing field %q", tc.name, key)
+				}
+			}
+		})
 	}
 
 	// A fully populated result exposes every nested contract field.
