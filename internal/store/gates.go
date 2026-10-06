@@ -57,8 +57,8 @@ func (g *Gate) check(ctx context.Context, q queryer, resource string, now time.T
 		// Bootstrap honors known account gates for the resource.
 		cands = append(cands, candidate{account: "*", scope: resource})
 	}
-	if resource == github.ResourceSecondary || g.account == "" {
-		// Secondary backoff is account-wide; bootstrap checks host-wide.
+	if g.account == "" {
+		// Bootstrap checks host-wide secondary backoff.
 		cands = append(cands, candidate{account: "*", scope: github.ResourceSecondary})
 	}
 
@@ -158,9 +158,9 @@ func (g *Gate) Backoff(resource string, until time.Time) {
 	}
 }
 
-// AdoptGateQuota copies the bootstrap scope's persisted quota for rest,
-// graphql, and secondary to the verified account, adopting the quota
-// recorded during identity verification.
+// AdoptGateQuota copies the bootstrap scope's persisted quota for all
+// resources to the verified account, adopting the quota recorded during
+// identity verification.
 func (s *Store) AdoptGateQuota(ctx context.Context, host, account string) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO rate_gates (host, account, resource, remaining, rate_limit, reset_ms, until_ms)

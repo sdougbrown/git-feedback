@@ -253,8 +253,6 @@ func (s *Store) Publish(ctx context.Context, in PublishInput) (PublishResult, er
 	return PublishResult{SnapshotID: formatSnapshotID(snapID), Changed: true}, nil
 }
 
-// finalize runs the pre-commit seams: the BeforePublishCommit hook, then the
-// fence recheck. Any error must roll back the whole publication.
 // finalize runs the pre-commit seams: the BeforePublishCommit hook, the
 // fence recheck, then the caller's Finalize (cadence update and lease
 // release) immediately before commit. Running Finalize after the recheck is

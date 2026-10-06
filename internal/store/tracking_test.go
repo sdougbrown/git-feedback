@@ -154,11 +154,11 @@ func TestAccountIsolation(t *testing.T) {
 	if err := st.AcquireAccountLease(ctx, host, "bob", "tokB", time.Minute, clk.Now()); err != nil {
 		t.Fatalf("bob lease must not collide with alice's: %v", err)
 	}
-	// Secondary backoff is account-wide: alice's secondary row blocks bob's
-	// secondary check (and both transports) on the same host.
+	// Secondary backoff is account-wide: alice's secondary row does not block
+	// bob's secondary check (host-wide secondary checking is bootstrap-only).
 	gA.Backoff(github.ResourceREST, clk.Now().Add(time.Hour))
-	if err := gB.Check(github.ResourceSecondary, clk.Now()); err == nil {
-		t.Fatal("bob secondary check must honor alice's secondary backoff")
+	if err := gB.Check(github.ResourceSecondary, clk.Now()); err != nil {
+		t.Fatalf("bob secondary check must not be blocked by alice's backoff: %v", err)
 	}
 	if err := st.ReleaseLease(ctx, host, "alice", "tokA"); err != nil {
 		t.Fatalf("release alice: %v", err)

@@ -261,6 +261,10 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 func (e *Engine) publish(ctx context.Context, target forge.Target, host, account, token string, min time.Duration, coll forge.CollectResult) (Result, error) {
 	now := e.Clock.Now()
 	nextDue := now.Add(min)
+	streamID, _, err := e.Store.StreamID(ctx, target.ID, account)
+	if err != nil {
+		return Result{}, err
+	}
 	res, err := e.Store.Publish(ctx, store.PublishInput{
 		Target:   target,
 		Account:  account,
@@ -296,7 +300,7 @@ func (e *Engine) publish(ctx context.Context, target forge.Target, host, account
 	if err != nil {
 		// The publication (and with it the finalization) rolled back. The
 		// fence may still hold; finalize as a failure so cadence advances.
-		att := e.finalizeFenced(ctx, host, account, token, 0, store.AttemptInput{
+		att := e.finalizeFenced(ctx, host, account, token, streamID, store.AttemptInput{
 			Outcome:   store.OutcomeFailed,
 			ErrorCode: errorCode(err),
 			NextDue:   nextDue,

@@ -158,15 +158,28 @@ func (s *Store) RecordPace(ctx context.Context, host, account string, at time.Ti
 	return nil
 }
 
-// TransferPace writes the verification timestamp to the verified account's
-// pacing row before the bootstrap lease is released, so the account's next
-// request still honors the spacing the verification request spent.
+// TransferPace transfers the bootstrap scope's recorded pace timestamp to
+// the verified account's pacing row before the bootstrap lease is released,
+// so the account's next request still honors the spacing the verification
+// request spent. If the bootstrap row has no recorded pace, the
+// verification timestamp is stamped instead.
 func (s *Store) TransferPace(ctx context.Context, host, fromAccount, toAccount string, at time.Time) error {
-	_, err := s.db.ExecContext(ctx,
+	var pace sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT pace_ms FROM leases WHERE host = ? AND account = ?`,
+		host, forge.CanonicalAccount(fromAccount)).Scan(&pace)
+	if err != nil && err != sql.ErrNoRows {
+		return &Error{Code: CodeStore, Message: fmt.Sprintf("read transfer pace: %v", err)}
+	}
+	stamp := at.UTC().UnixMilli()
+	if pace.Valid {
+		stamp = pace.Int64
+	}
+	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO leases (host, account, pace_ms) VALUES (?, ?, ?)
 		 ON CONFLICT(host, account) DO UPDATE SET
 		   pace_ms = MAX(COALESCE(pace_ms, 0), excluded.pace_ms)`,
-		host, forge.CanonicalAccount(toAccount), at.UTC().UnixMilli())
+		host, forge.CanonicalAccount(toAccount), stamp)
 	if err != nil {
 		return &Error{Code: CodeStore, Message: fmt.Sprintf("transfer pace: %v", err)}
 	}
@@ -179,12 +192,12 @@ type Pacer struct {
 	db      *sql.DB
 	host    string
 	account string
-	Clock   clock.Clock
+	clk     clock.Clock
 }
 
 // NewPacer returns the pacing service bound to one (host, account) scope.
 func (s *Store) NewPacer(host, account string) *Pacer {
-	return &Pacer{db: s.db, host: host, account: forge.CanonicalAccount(account), Clock: s.Clock}
+	return &Pacer{db: s.db, host: host, account: forge.CanonicalAccount(account), clk: s.Clock}
 }
 
 // claim reserves the next request slot: it returns the time the request may
@@ -201,7 +214,7 @@ func (p *Pacer) claim(ctx context.Context) (time.Time, error) {
 	if err != nil && err != sql.ErrNoRows {
 		return time.Time{}, &Error{Code: CodeStore, Message: fmt.Sprintf("read pace: %v", err)}
 	}
-	now := p.Clock.Now().UTC()
+	now := p.clk.Now().UTC()
 	next := now
 	if pace.Valid {
 		if cand := time.UnixMilli(pace.Int64).UTC().Add(PacingSpacing); cand.After(next) {
@@ -230,8 +243,8 @@ func (p *Pacer) Wait(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if d := next.Sub(p.Clock.Now()); d > 0 {
-		p.Clock.Sleep(d)
+	if d := next.Sub(p.clk.Now()); d > 0 {
+		p.clk.Sleep(d)
 	}
 	return ctx.Err()
 }
