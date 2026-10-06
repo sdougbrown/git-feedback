@@ -344,8 +344,7 @@ func TestWaitReusesVerifiedSession(t *testing.T) {
 // without issuing a single GraphQL request.
 func TestWaitHonorsPersistedRateGate(t *testing.T) {
 	stub := newStub(t)
-	stub.rateRemaining = 5
-	stub.rateReset = time.Now().Add(time.Hour)
+	stub.exhaustGraphQL(5, time.Now().Add(time.Hour))
 	env := testEnv(fakeGHPath(t), stub.srv.URL, nil)
 	dir := testState(t)
 

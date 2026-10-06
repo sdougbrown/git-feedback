@@ -177,11 +177,21 @@ func (s *ghStub) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(resp))
 }
 
+// exhaustGraphQL makes the fake report a GraphQL budget below the reserve
+// until reset, so callers persist an exhausted gate.
+func (s *ghStub) exhaustGraphQL(remaining int, reset time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rateRemaining, s.rateReset = remaining, reset
+}
+
 // verifyResponse builds the viewer verification payload, optionally
 // exhausting the persisted GraphQL budget.
 func (s *ghStub) verifyResponse() string {
-	remaining, reset := 5000, "2026-02-01T00:00:00Z"
-	if s.rateRemaining != 0 {
+	s.mu.Lock()
+	remaining, reset, exhausted := 5000, "2026-02-01T00:00:00Z", s.rateRemaining != 0
+	s.mu.Unlock()
+	if exhausted {
 		remaining = s.rateRemaining
 		reset = s.rateReset.UTC().Format(time.RFC3339)
 	}
