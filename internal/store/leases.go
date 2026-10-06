@@ -146,18 +146,6 @@ func (s *Store) RefreshLease(ctx context.Context, host, account, token string, t
 	return nil
 }
 
-// RecordPace records the scope's last-request time.
-func (s *Store) RecordPace(ctx context.Context, host, account string, at time.Time) error {
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO leases (host, account, pace_ms) VALUES (?, ?, ?)
-		 ON CONFLICT(host, account) DO UPDATE SET pace_ms = excluded.pace_ms`,
-		host, forge.CanonicalAccount(account), at.UTC().UnixMilli())
-	if err != nil {
-		return &Error{Code: CodeStore, Message: fmt.Sprintf("record pace: %v", err)}
-	}
-	return nil
-}
-
 // TransferPace transfers the bootstrap scope's recorded pace timestamp to
 // the verified account's pacing row before the bootstrap lease is released,
 // so the account's next request still honors the spacing the verification
