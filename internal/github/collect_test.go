@@ -27,9 +27,10 @@ type restPageSpec struct {
 // If-None-Match matches the next page's ETag gets a 304 without consuming
 // the page, so tests can model both unchanged and changed representations.
 type stubServer struct {
-	graphql map[string][]string // "threads" | "nested" | "other"
-	rest    map[string][]restPageSpec
-	heads   []string // head SHAs served in sequence; the last repeats
+	graphql    map[string][]string // "threads" | "nested" | "other"
+	rest       map[string][]restPageSpec
+	heads      []string // head SHAs served in sequence; the last repeats
+	restServed int      // counts unconditional REST page bodies served
 }
 
 func (s *stubServer) handler() http.HandlerFunc {
@@ -79,6 +80,7 @@ func (s *stubServer) handler() http.HandlerFunc {
 				return
 			}
 			rcount[key] = ri + 1
+			s.restServed++
 			status := p.status
 			if status == 0 {
 				status = http.StatusOK
@@ -290,6 +292,9 @@ func TestHeadDrift(t *testing.T) {
 	if result.Snapshot != nil || result.Complete {
 		t.Fatal("no publishable snapshot may accompany head drift")
 	}
+	if result.HeadBefore == "" || result.HeadAfter == "" {
+		t.Fatalf("head drift must carry both SHAs: before=%q after=%q", result.HeadBefore, result.HeadAfter)
+	}
 }
 
 func TestConditionalLaterPageChanged(t *testing.T) {
@@ -343,5 +348,39 @@ func TestMissingCachedBodyRefetches(t *testing.T) {
 	}
 	if len(inv.Snapshot.Reviews) != 1 {
 		t.Fatalf("want the refetched review, got %d", len(inv.Snapshot.Reviews))
+	}
+}
+
+func TestConditionalLastPageCached(t *testing.T) {
+	stub := baseStub(t)
+	standardThreads(t, stub)
+	// Single-page REST responses with ETags but no Link headers (final pages).
+	stub.rest["reviews"] = []restPageSpec{{body: `[{"id":1,"user":{"login":"carol"},"body":"review body","state":"APPROVED","commit_id":"abc"}]`, etag: "e1"}}
+	stub.rest["comments"] = []restPageSpec{{body: "[]", etag: "e2"}}
+	adapter, sess := newCollectEnv(t, stub)
+
+	inv1, err := adapter.collect(context.Background(), sess.tp, testTarget(t), forge.CollectOptions{})
+	if err != nil {
+		t.Fatalf("first collect: %v", err)
+	}
+	if len(inv1.Snapshot.Reviews) != 1 {
+		t.Fatalf("want 1 review, got %d", len(inv1.Snapshot.Reviews))
+	}
+	servedAfterFirst := stub.restServed
+
+	// Second collect: the final pages should be served from the 304 cache,
+	// not refetched unconditionally.
+	inv2, err := adapter.collect(context.Background(), sess.tp, testTarget(t), forge.CollectOptions{})
+	if err != nil {
+		t.Fatalf("second collect: %v", err)
+	}
+	if len(inv2.Snapshot.Reviews) != 1 {
+		t.Fatalf("want 1 review from cache, got %d", len(inv2.Snapshot.Reviews))
+	}
+	if inv2.Snapshot.Reviews[0].Body != "review body" {
+		t.Fatalf("cached review body mismatch: %q", inv2.Snapshot.Reviews[0].Body)
+	}
+	if stub.restServed != servedAfterFirst {
+		t.Fatalf("final page was refetched instead of served from 304 cache: served %d → %d", servedAfterFirst, stub.restServed)
 	}
 }

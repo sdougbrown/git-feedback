@@ -91,8 +91,9 @@ func snapshotIdentity(snap forge.Snapshot, targetID string) string {
 	for _, o := range collectObjects(snap) {
 		doc.Objects = append(doc.Objects, identityTuple{Kind: string(o.kind), ID: o.id, Fingerprint: o.fingerprint})
 	}
-	// encoding/json emits map-free structs in field order; keep the tuples
-	// sorted by (kind, id) as collectObjects guarantees.
+	// encoding/json emits map-free structs in field order; the tuples are
+	// grouped by kind in fixed order (threads, reviews, comments), id-sorted
+	// within kind, as collectObjects guarantees.
 	b, err := json.Marshal(doc)
 	if err != nil {
 		panic("store: identity marshal failed: " + err.Error())
@@ -164,7 +165,6 @@ func (s *Store) Publish(ctx context.Context, in PublishInput) (PublishResult, er
 		return PublishResult{}, &Error{Code: CodeInvalidInput, Message: "publish requires target host"}
 	}
 	account := forge.CanonicalAccount(in.Account)
-	now := s.Clock.Now().UTC()
 	snap := normalizeSnapshot(*in.Snapshot)
 	identityFP := snapshotIdentity(snap, in.Target.ID)
 	body, err := json.Marshal(snap)
@@ -177,6 +177,7 @@ func (s *Store) Publish(ctx context.Context, in PublishInput) (PublishResult, er
 		return PublishResult{}, &Error{Code: CodeStore, Message: fmt.Sprintf("begin publish: %v", err)}
 	}
 	defer tx.Rollback()
+	now := s.Clock.Now().UTC()
 
 	streamID, currentID, err := resolveOrCreateStream(ctx, tx, in, account)
 	if err != nil {

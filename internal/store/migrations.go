@@ -78,19 +78,6 @@ func migrate(db *sql.DB) error {
 		return &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("prepare schema_version: %v", err)}
 	}
 
-	var known int
-	if err := tx.QueryRow(
-		`SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN (?,?,?,?,?,?,?,?,?)`,
-		knownTables[0], knownTables[1], knownTables[2], knownTables[3],
-		knownTables[4], knownTables[5], knownTables[6], knownTables[7],
-		"schema_version",
-	).Scan(&known); err != nil {
-		return &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("inspect schema: %v", err)}
-	}
-	if known == 0 {
-		return &Error{Code: CodeStoreCorrupt, Message: "no store schema found"}
-	}
-
 	var hasVersion, hasTables int
 	if err := tx.QueryRow(
 		`SELECT (SELECT count(*) FROM schema_version), (SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN (?,?,?,?,?,?,?,?))`,

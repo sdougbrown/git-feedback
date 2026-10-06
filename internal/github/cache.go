@@ -5,10 +5,13 @@ import "sync"
 // CacheEntry is one conditional-GET cache entry: the ETag to revalidate
 // against, the complete body, and the pagination metadata (the raw Link
 // header) that must travel with the body for a 304 to be usable.
+// HasLink distinguishes "no next link" (final page) from "missing
+// pagination metadata" (incomplete entry).
 type CacheEntry struct {
-	ETag string
-	Body []byte
-	Link string
+	ETag    string
+	Body    []byte
+	Link    string
+	HasLink bool
 }
 
 // HTTPCache stores conditional-GET representations keyed by full URL.
