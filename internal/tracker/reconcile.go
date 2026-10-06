@@ -51,6 +51,10 @@ type Engine struct {
 	// cache) for one (host, account) scope. Nil binds the store-backed
 	// implementations; exposed for tests that substitute in-memory ones.
 	NewServices func(host, account string) Services
+
+	// OpenStore, when set, opens per-cycle stores whose SQLite lock waits
+	// are bounded by the remaining deadline. Nil reuses Store.
+	OpenStore OpenStore
 }
 
 // Services bundles the scope-bound collection services.
@@ -97,6 +101,10 @@ type Result struct {
 
 	Snapshot *store.SnapshotSummary
 	Attempt  *store.Attempt
+
+	// Session is the verified session that produced this result, carried so
+	// the wait loop can reuse it across cycles instead of re-verifying.
+	Session forge.Session
 
 	Freshness    Freshness
 	BlockedUntil time.Time // cadence or gate until, when deferred
@@ -176,7 +184,9 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 	case store.AcquireBusy:
 		return Result{Status: StatusBusy, Target: target}, nil
 	case store.AcquireDeferredDue, store.AcquireDeferredGated:
-		return e.deferredResult(ctx, target, account, acq.BlockedUntil), nil
+		res := e.deferredResult(ctx, target, account, acq.BlockedUntil)
+		res.Session = sess
+		return res, nil
 	}
 
 	// Collection runs outside any write transaction while a refresh loop
@@ -199,14 +209,16 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 	<-done
 
 	if collErr == nil && coll.Complete {
-		return e.publish(ctx, target, host, account, token, min, coll)
+		return e.publish(ctx, target, host, account, token, min, coll, sess)
 	}
 	if collErr != nil {
 		var rl *forge.ErrRateLimited
 		if errors.As(collErr, &rl) {
 			// The gate already persisted the backoff; release and defer.
 			_ = e.Store.ReleaseLease(ctx, host, account, token)
-			return e.deferredResult(ctx, target, account, rl.Until), nil
+			res := e.deferredResult(ctx, target, account, rl.Until)
+			res.Session = sess
+			return res, nil
 		}
 		if errors.Is(collErr, forge.ErrHeadChanged) {
 			observed, expected := coll.HeadAfter, coll.HeadBefore
@@ -232,6 +244,7 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 				Snapshot:        e.currentSnapshot(ctx, target.ID, account),
 				Freshness:       e.freshness(ctx, target.ID, account),
 				Attempt:         att,
+				Session:         sess,
 				BlockedUntil:    e.nextDueOr(),
 			}
 			if att != nil {
@@ -248,17 +261,17 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 			NextDue:   e.Clock.Now().Add(min),
 		})
 		if ctx.Err() != nil {
-			return Result{Attempt: att}, ctx.Err()
+			return Result{Attempt: att, Session: sess}, ctx.Err()
 		}
-		return Result{Status: StatusError, Target: target, Account: account, HasAccount: true, Attempt: att}, collErr
+		return Result{Status: StatusError, Target: target, Account: account, HasAccount: true, Attempt: att, Session: sess}, collErr
 	}
 	// A nil error with an incomplete result is an adapter contract bug.
-	return Result{Status: StatusError, Target: target, Account: account, HasAccount: true}, forge.ErrIncomplete
+	return Result{Status: StatusError, Target: target, Account: account, HasAccount: true, Session: sess}, forge.ErrIncomplete
 }
 
 // publish publishes the complete inventory with the fence and finalizes
 // cadence and lease ownership inside the publish transaction.
-func (e *Engine) publish(ctx context.Context, target forge.Target, host, account, token string, min time.Duration, coll forge.CollectResult) (Result, error) {
+func (e *Engine) publish(ctx context.Context, target forge.Target, host, account, token string, min time.Duration, coll forge.CollectResult, sess forge.Session) (Result, error) {
 	now := e.Clock.Now()
 	nextDue := now.Add(min)
 	streamID, _, err := e.Store.StreamID(ctx, target.ID, account)
@@ -321,6 +334,7 @@ func (e *Engine) publish(ctx context.Context, target forge.Target, host, account
 		HasObservedHead: true,
 		Snapshot:        e.currentSnapshot(ctx, target.ID, account),
 		Freshness:       e.freshness(ctx, target.ID, account),
+		Session:         sess,
 	}, nil
 }
 

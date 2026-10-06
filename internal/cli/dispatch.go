@@ -87,16 +87,8 @@ var specs = map[string]commandSpec{
 	},
 	"wait": {
 		flags:  []flagSpec{{"consumer", flagString}, {"timeout", flagString}, {"head", flagString}, {"limit", flagString}},
-		handle: handleNotImplemented,
+		handle: handleWait,
 	},
-}
-
-// handleNotImplemented is the Stage 1 placeholder handler.
-func handleNotImplemented(ctx context.Context, inv Invocation) (Result, error) {
-	return Result{Command: inv.Command}, &statusError{
-		code:    "not_implemented",
-		message: fmt.Sprintf("%s is not implemented yet", inv.Command),
-	}
 }
 
 // parseInvocation parses argv (without the program name) for one subcommand.
@@ -220,6 +212,10 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		return SignalExitCode(sig)
 	default:
 	}
+
+	// Test-only crash point: after the result is computed, before the
+	// envelope is written. No-op in the default build.
+	CrashBeforeOutput()
 
 	if err := writeResult(stdout, result); err != nil {
 		fmt.Fprintln(stderr, err.Error())

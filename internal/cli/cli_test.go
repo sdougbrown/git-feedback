@@ -126,26 +126,27 @@ func TestEnvelopeFields(t *testing.T) {
 	// Every command must emit every contract field, including
 	// reviewer_completion "unknown". Implemented commands fail here before
 	// any network access: reconcile on an unsupported host, the local
-	// commands on a store with no initialized stream. wait remains the
-	// Stage 1 placeholder.
+	// commands on a store with no initialized stream, and wait without the
+	// required --consumer (a usage error, exit 2).
 	base := t.TempDir()
 	tests := []struct {
 		name string
 		argv []string
 		code string
+		exit int
 	}{
-		{"reconcile", []string{"reconcile", "--state-dir", base, "https://gitlab.com/o/r/pull/1"}, "unsupported_host"},
-		{"snapshot", []string{"snapshot", "--snapshot", "s1", "--output", "/tmp/x", "--state-dir", base, "https://github.com/o/r/pull/1"}, "unknown_stream"},
-		{"inbox", []string{"inbox", "--consumer", "ci", "--state-dir", base, "https://github.com/o/r/pull/1"}, "unknown_stream"},
-		{"ack", []string{"ack", "--consumer", "ci", "--event", "e1", "--state-dir", base, "https://github.com/o/r/pull/1"}, "unknown_stream"},
-		{"wait", []string{"wait", "https://github.com/o/r/pull/1"}, "not_implemented"},
+		{"reconcile", []string{"reconcile", "--state-dir", base, "https://gitlab.com/o/r/pull/1"}, "unsupported_host", 1},
+		{"snapshot", []string{"snapshot", "--snapshot", "s1", "--output", "/tmp/x", "--state-dir", base, "https://github.com/o/r/pull/1"}, "unknown_stream", 1},
+		{"inbox", []string{"inbox", "--consumer", "ci", "--state-dir", base, "https://github.com/o/r/pull/1"}, "unknown_stream", 1},
+		{"ack", []string{"ack", "--consumer", "ci", "--event", "e1", "--state-dir", base, "https://github.com/o/r/pull/1"}, "unknown_stream", 1},
+		{"wait", []string{"wait", "--state-dir", base, "https://github.com/o/r/pull/1"}, "usage", 2},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout bytes.Buffer
 			code := Run(tc.argv, &stdout, &bytes.Buffer{})
-			if code != 1 {
-				t.Fatalf("%s: exit code = %d, want 1", tc.name, code)
+			if code != tc.exit {
+				t.Fatalf("%s: exit code = %d, want %d", tc.name, code, tc.exit)
 			}
 			var envelope map[string]json.RawMessage
 			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {

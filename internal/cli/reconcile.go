@@ -25,7 +25,10 @@ func handleReconcile(ctx context.Context, inv Invocation) (Result, error) {
 	}
 	defer st.Close()
 
-	eng := &tracker.Engine{Store: st, Clock: clk}
+	eng, err := newEngine(st, clk)
+	if err != nil {
+		return Result{}, err
+	}
 	res, err := eng.Reconcile(ctx, tracker.ReconcileInput{
 		URL:     inv.URL,
 		Head:    inv.Flags["head"],

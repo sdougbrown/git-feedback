@@ -57,6 +57,9 @@ type Options struct {
 	// Clock is consulted for fence expiry and observed_at stamps. Nil uses
 	// clock.Real.
 	Clock clock.Clock
+	// BusyTimeout bounds SQLite lock waits (zero uses the pinned 5000ms).
+	// Callers with a command deadline clamp it to the remaining time.
+	BusyTimeout time.Duration
 }
 
 // Store is the durable observation store rooted at one state directory.
@@ -83,7 +86,7 @@ type Hooks struct {
 // applies pending schema migrations. A corrupt or newer-than-supported store
 // is refused without replacement.
 func Open(stateDir string, opts Options) (*Store, error) {
-	db, _, err := openDatabase(stateDir)
+	db, _, err := openDatabase(stateDir, int(opts.BusyTimeout/time.Millisecond))
 	if err != nil {
 		return nil, err
 	}

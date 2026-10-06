@@ -2,8 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
-	"strconv"
 
 	"github.com/sdougbrown/git-feedback/internal/store"
 )
@@ -15,15 +13,9 @@ func handleInbox(ctx context.Context, inv Invocation) (Result, error) {
 	if consumer == "" {
 		return Result{}, &usageError{"inbox requires --consumer <NAME>"}
 	}
-	limit := store.DefaultInboxLimit
-	if raw := inv.Flags["limit"]; raw != "" {
-		n, perr := strconv.Atoi(raw)
-		if perr != nil || n < store.MinInboxLimit || n > store.MaxInboxLimit {
-			return Result{}, &usageError{
-				fmt.Sprintf("invalid --limit %q (expected %d–%d)", raw, store.MinInboxLimit, store.MaxInboxLimit),
-			}
-		}
-		limit = n
+	limit, err := parseLimit(inv)
+	if err != nil {
+		return Result{}, err
 	}
 	clk := newClock()
 	st, err := openStore(inv, clk)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,6 +90,21 @@ func resolveLocal(ctx context.Context, st *store.Store, inv Invocation) (forge.T
 			message: fmt.Sprintf("multiple stored accounts (%s) for %s; pass --account", strings.Join(accounts, ", "), t.ID),
 		}
 	}
+}
+
+// parseLimit resolves the shared --limit flag (1–200, default 50).
+func parseLimit(inv Invocation) (int, error) {
+	limit := store.DefaultInboxLimit
+	if raw := inv.Flags["limit"]; raw != "" {
+		n, perr := strconv.Atoi(raw)
+		if perr != nil || n < store.MinInboxLimit || n > store.MaxInboxLimit {
+			return 0, &usageError{
+				fmt.Sprintf("invalid --limit %q (expected %d–%d)", raw, store.MinInboxLimit, store.MaxInboxLimit),
+			}
+		}
+		limit = n
+	}
+	return limit, nil
 }
 
 // localEnvelope fills the shared envelope fields for a local command from

@@ -12,16 +12,23 @@ import (
 // dbFilename is the SQLite database file inside the state directory.
 const dbFilename = "feedback.db"
 
+// DefaultBusyTimeout is the pinned busy timeout applied when an option
+// does not override it.
+const DefaultBusyTimeout = 5000
+
 // dsn builds the modernc.org/sqlite DSN with the pinned pragmas applied on
-// every connection: WAL journaling, a 5s busy timeout, and enforced foreign
-// keys (foreign keys are per-connection in SQLite).
-func dsn(path string) string {
-	return fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", path)
+// every connection: WAL journaling, the given busy timeout in milliseconds,
+// and enforced foreign keys (foreign keys are per-connection in SQLite).
+func dsn(path string, busyTimeoutMS int) string {
+	if busyTimeoutMS <= 0 {
+		busyTimeoutMS = DefaultBusyTimeout
+	}
+	return fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(1)", path, busyTimeoutMS)
 }
 
 // openDatabase opens (creating if needed) the store's database file with the
 // pinned permissions and pragmas, and refuses corrupt files.
-func openDatabase(stateDir string) (*sql.DB, string, error) {
+func openDatabase(stateDir string, busyTimeoutMS int) (*sql.DB, string, error) {
 	dir := filepath.Clean(stateDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, "", &Error{Code: CodeStore, Message: fmt.Sprintf("create state directory: %v", err)}
@@ -30,7 +37,7 @@ func openDatabase(stateDir string) (*sql.DB, string, error) {
 		return nil, "", &Error{Code: CodeStore, Message: fmt.Sprintf("restrict state directory: %v", err)}
 	}
 	path := filepath.Join(dir, dbFilename)
-	db, err := sql.Open("sqlite", dsn(path))
+	db, err := sql.Open("sqlite", dsn(path, busyTimeoutMS))
 	if err != nil {
 		return nil, "", corruptOrStore(path, err)
 	}

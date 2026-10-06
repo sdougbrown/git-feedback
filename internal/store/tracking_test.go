@@ -38,7 +38,7 @@ func TestTrackingMigrationPreservesInbox(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	path := filepath.Join(dir, dbFilename)
-	db, err := sql.Open("sqlite", dsn(path))
+	db, err := sql.Open("sqlite", dsn(path, 5000))
 	if err != nil {
 		t.Fatalf("open raw db: %v", err)
 	}
