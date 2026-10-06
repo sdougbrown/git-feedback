@@ -29,6 +29,7 @@ func (a *Adapter) restGet(ctx context.Context, tp *Transport, url string) (restP
 	if err != nil {
 		return restPage{}, CacheEntry{}, err
 	}
+	newEntry := CacheEntry{ETag: header.Get("ETag"), Body: body, Link: header.Get("Link")}
 	if status == http.StatusNotModified {
 		if !cached || len(entry.Body) == 0 || entry.Link == "" {
 			// The cached representation is incomplete: refetch unconditionally.
@@ -36,14 +37,16 @@ func (a *Adapter) restGet(ctx context.Context, tp *Transport, url string) (restP
 			if err != nil {
 				return restPage{}, CacheEntry{}, err
 			}
+			newEntry = CacheEntry{ETag: header.Get("ETag"), Body: body, Link: header.Get("Link")}
 		} else {
 			body = entry.Body
+			newEntry = entry
+			status = http.StatusOK // accepted 304
 		}
 	}
 	if status != http.StatusOK {
 		return restPage{}, CacheEntry{}, fmt.Errorf("%w: REST %s returned HTTP %d", forge.ErrIncomplete, url, status)
 	}
-	newEntry := CacheEntry{ETag: header.Get("ETag"), Body: body, Link: header.Get("Link")}
 	return restPage{Body: body, Link: newEntry.Link, Info: info, HasInfo: hasInfo}, newEntry, nil
 }
 
