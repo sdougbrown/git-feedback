@@ -27,10 +27,11 @@ type restPageSpec struct {
 // If-None-Match matches the next page's ETag gets a 304 without consuming
 // the page, so tests can model both unchanged and changed representations.
 type stubServer struct {
-	graphql    map[string][]string // "threads" | "nested" | "other"
-	rest       map[string][]restPageSpec
-	heads      []string // head SHAs served in sequence; the last repeats
-	restServed int      // counts unconditional REST page bodies served
+	graphql      map[string][]string // "threads" | "nested" | "other"
+	rest         map[string][]restPageSpec
+	heads        []string // head SHAs served in sequence; the last repeats
+	restServed   int      // counts unconditional REST page bodies served
+	nestedServed int      // counts nested comment page bodies served
 }
 
 func (s *stubServer) handler() http.HandlerFunc {
@@ -65,6 +66,9 @@ func (s *stubServer) handler() http.HandlerFunc {
 				gi = len(pages) - 1
 			}
 			gcount[key] = gi + 1
+			if key == "nested" {
+				s.nestedServed++
+			}
 			w.Write([]byte(pages[gi]))
 		case strings.Contains(r.URL.Path, "/reviews") || strings.Contains(r.URL.Path, "/comments"):
 			key := restKey(r)
@@ -251,6 +255,27 @@ func TestEditedOldReview(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("review fingerprint mismatch: %s != %s", got, want)
+	}
+}
+
+func TestRepeatedNestedCursorFails(t *testing.T) {
+	// The nested comments page repeats its endCursor with non-empty nodes
+	// and hasNextPage true. Without a seen-cursor guard this loops
+	// forever; the deadline bounds the test so a regression fails fast.
+	stub := baseStub(t)
+	stub.graphql["threads"] = []string{`{"data": {"repository": {"pullRequest": {"reviewThreads": {"totalCount": 1, "pageInfo": {"hasNextPage": false, "endCursor": null}, "nodes": [{"id": "T7", "isOutdated": false, "isResolved": false, "path": "a.go", "comments": {"totalCount": 2, "pageInfo": {"hasNextPage": true, "endCursor": "nc1"}, "nodes": [{"id": "C1", "body": "root", "createdAt": "2024-01-01T00:00:00Z", "author": {"login": "alice"}}]}}]}}}, "rateLimit": {"remaining": 3990, "limit": 5000, "resetAt": "2030-01-01T00:00:00Z"}}, "errors": null}`}
+	stub.graphql["nested"] = []string{`{"data": {"node": {"comments": {"totalCount": 2, "pageInfo": {"hasNextPage": true, "endCursor": "nc1"}, "nodes": [{"id": "C2", "body": "reply", "createdAt": "2024-01-01T00:00:00Z", "author": {"login": "bob"}}]}}, "rateLimit": {"remaining": 3989, "limit": 5000, "resetAt": "2030-01-01T00:00:00Z"}}, "errors": null}`}
+	standardREST(stub)
+	adapter, sess := newCollectEnv(t, stub)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := adapter.collect(ctx, sess.tp, testTarget(t), forge.CollectOptions{})
+	if !errors.Is(err, forge.ErrIncomplete) {
+		t.Fatalf("want ErrIncomplete, got %v", err)
+	}
+	if stub.nestedServed > 2 {
+		t.Fatalf("nested pagination did not terminate: %d nested pages served", stub.nestedServed)
 	}
 }
 

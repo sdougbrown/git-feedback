@@ -129,6 +129,7 @@ func (a *Adapter) collectThreads(ctx context.Context, tp *Transport, t forge.Tar
 
 // fillThreadComments fetches remaining nested comment pages for one thread.
 func (a *Adapter) fillThreadComments(ctx context.Context, tp *Transport, node gqlThreadNode, st *collectState) (gqlThreadNode, error) {
+	seen := map[string]bool{}
 	for node.Comments.PageInfo.HasNextPage {
 		cursor := ""
 		if node.Comments.PageInfo.EndCursor != nil {
@@ -137,6 +138,10 @@ func (a *Adapter) fillThreadComments(ctx context.Context, tp *Transport, node gq
 		if cursor == "" {
 			return node, fmt.Errorf("%w: nested comment pagination missing cursor on thread %s", forge.ErrIncomplete, node.ID)
 		}
+		if seen[cursor] {
+			return node, fmt.Errorf("%w: nested comment pagination repeated cursor %q on thread %s", forge.ErrIncomplete, cursor, node.ID)
+		}
+		seen[cursor] = true
 		vars := map[string]any{"id": node.ID, "cursor": cursor}
 		data, gqlErrs, info, hasInfo, err := tp.GraphQL(ctx, threadCommentsQuery, vars)
 		if err != nil {
@@ -155,9 +160,6 @@ func (a *Adapter) fillThreadComments(ctx context.Context, tp *Transport, node gq
 		}
 		if err := a.recordGQLRateLimit(payload.RateLimit); err != nil {
 			return node, err
-		}
-		if node.Comments.PageInfo.EndCursor != nil && cursor == *node.Comments.PageInfo.EndCursor && len(payload.Node.Comments.Nodes) == 0 {
-			return node, fmt.Errorf("%w: nested comment pagination repeated cursor %q on thread %s", forge.ErrIncomplete, cursor, node.ID)
 		}
 		node.Comments.Nodes = append(node.Comments.Nodes, payload.Node.Comments.Nodes...)
 		node.Comments.PageInfo = payload.Node.Comments.PageInfo
