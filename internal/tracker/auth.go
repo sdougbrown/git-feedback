@@ -79,10 +79,20 @@ func (e *Engine) admit(ctx context.Context, target forge.Target, account, token 
 	// The verification request's pacing timestamp belongs to the verified
 	// account's schedule now; adopt the recorded gate quota with it.
 	now := e.Clock.Now()
-	if err := e.Store.TransferPace(ctx, host, "", verified, now); err != nil {
+	tp := e.Store.TransferPace
+	if e.TransferPace != nil {
+		tp = e.TransferPace
+	}
+	if err := tp(ctx, host, "", verified, now); err != nil {
+		e.releaseBootstrap(ctx, host, token)
 		return nil, "", nil, err
 	}
-	if err := e.Store.AdoptGateQuota(ctx, host, verified); err != nil {
+	agq := e.Store.AdoptGateQuota
+	if e.AdoptGateQuota != nil {
+		agq = e.AdoptGateQuota
+	}
+	if err := agq(ctx, host, verified); err != nil {
+		e.releaseBootstrap(ctx, host, token)
 		return nil, "", nil, err
 	}
 	if err := e.Store.ReleaseLease(ctx, host, "", token); err != nil {

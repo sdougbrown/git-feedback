@@ -60,6 +60,14 @@ type Engine struct {
 	// OpenStore, when set, opens per-cycle stores whose SQLite lock waits
 	// are bounded by the remaining deadline. Nil reuses Store.
 	OpenStore OpenStore
+
+	// TransferPace, when set, overrides the store's TransferPace. Nil uses
+	// the store's implementation. Exposed for tests that inject a store failure.
+	TransferPace func(ctx context.Context, host, from, to string, at time.Time) error
+
+	// AdoptGateQuota, when set, overrides the store's AdoptGateQuota. Nil
+	// uses the store's implementation. Exposed for tests that inject a store failure.
+	AdoptGateQuota func(ctx context.Context, host, account string) error
 }
 
 // Services bundles the scope-bound collection services.

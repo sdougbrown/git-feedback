@@ -200,6 +200,42 @@ func countTable(t *testing.T, dir, table string) int {
 	return n
 }
 
+// TestAdmitTransferPaceFailureReleasesBootstrap: a TransferPace store
+// failure during admit releases the bootstrap lease, so a subsequent
+// bootstrap admission is not busy.
+func TestAdmitTransferPaceFailureReleasesBootstrap(t *testing.T) {
+	e := newEnv(t)
+	e.eng.TransferPace = func(ctx context.Context, host, from, to string, at time.Time) error {
+		return errors.New("injected transfer_pace failure")
+	}
+	_, err := e.eng.Reconcile(context.Background(), ReconcileInput{URL: testURL})
+	if err == nil {
+		t.Fatal("expected a TransferPace error, got nil")
+	}
+	// The bootstrap lease was released: a fresh bootstrap lease can be taken.
+	if err := e.st.AcquireBootstrapLease(context.Background(), testHost, "x", time.Minute, e.clk.Now()); err != nil {
+		t.Fatalf("bootstrap lease after TransferPace failure: %v", err)
+	}
+}
+
+// TestAdmitAdoptGateQuotaFailureReleasesBootstrap: an AdoptGateQuota store
+// failure during admit releases the bootstrap lease, so a subsequent
+// bootstrap admission is not busy.
+func TestAdmitAdoptGateQuotaFailureReleasesBootstrap(t *testing.T) {
+	e := newEnv(t)
+	e.eng.AdoptGateQuota = func(ctx context.Context, host, account string) error {
+		return errors.New("injected adopt_gate_quota failure")
+	}
+	_, err := e.eng.Reconcile(context.Background(), ReconcileInput{URL: testURL})
+	if err == nil {
+		t.Fatal("expected an AdoptGateQuota error, got nil")
+	}
+	// The bootstrap lease was released: a fresh bootstrap lease can be taken.
+	if err := e.st.AcquireBootstrapLease(context.Background(), testHost, "x", time.Minute, e.clk.Now()); err != nil {
+		t.Fatalf("bootstrap lease after AdoptGateQuota failure: %v", err)
+	}
+}
+
 // TestConcurrentCollectors: two same-stream cycles race; exactly one
 // collects and the loser is busy during ownership.
 func TestConcurrentCollectors(t *testing.T) {
