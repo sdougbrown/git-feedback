@@ -22,6 +22,11 @@ const (
 	ResourceSecondary = "secondary"
 )
 
+// DefaultAPIBase is the GitHub REST/GraphQL API root used when no override
+// is supplied. Request paths are joined with a leading slash, so the base
+// carries no trailing slash.
+const DefaultAPIBase = "https://api.github.com"
+
 // Transport performs read-only HTTP requests against the GitHub API. Every
 // request — including viewer verification and unconditional refetches — is
 // gated and paced before it leaves the process.
@@ -35,8 +40,13 @@ type Transport struct {
 }
 
 // NewTransport builds a Transport for the API at apiBase (e.g.
-// https://api.github.com) authenticated with token.
+// https://api.github.com) authenticated with token. An empty apiBase
+// selects the GitHub API default; the production build never injects a
+// test-only override.
 func NewTransport(apiBase, token string, pacer RequestPacer, gate RateGate, clk clock.Clock) (*Transport, error) {
+	if apiBase == "" {
+		apiBase = DefaultAPIBase
+	}
 	u, err := url.Parse(apiBase)
 	if err != nil || u.Host == "" {
 		return nil, fmt.Errorf("invalid API base URL %q", apiBase)
