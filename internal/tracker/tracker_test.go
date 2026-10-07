@@ -150,8 +150,17 @@ type env struct {
 var baseTime = time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
 
 func newEnv(t *testing.T) *env {
+	return newEnvAt(t, baseTime)
+}
+
+// newEnvAt wires one engine against one fake store, clock (at base), and
+// server. Callers that drive a context-deadline wait pass a base in the
+// past relative to the real deadline, so a retried wait's wake interval
+// stays positive and it sleeps once until the deadline instead of spinning
+// on a negative interval.
+func newEnvAt(t *testing.T, base time.Time) *env {
 	t.Helper()
-	clk := clock.NewFake(baseTime)
+	clk := clock.NewFake(base)
 	dir := filepath.Join(t.TempDir(), "state")
 	st, err := store.Open(dir, store.Options{Clock: clk})
 	if err != nil {
@@ -508,6 +517,79 @@ func TestWaitStoreOpenErrorPlumbing(t *testing.T) {
 		// Must have retried at least twice before the deadline.
 		if attempts < 2 {
 			t.Fatalf("wait: attempts = %d, want >= 2 (retry must bite)", attempts)
+		}
+	})
+}
+
+// errAdapter is a forge.Adapter whose Collect returns a fixed error, so a
+// wait cycle fails with an injected reconcile error through the adapter
+// seam (the same injection point as the storeOpenErr pattern above).
+type errAdapter struct{ err error }
+
+func (a *errAdapter) Host() string { return testHost }
+func (a *errAdapter) ParseTarget(raw string) (forge.Target, error) {
+	return forge.Target{}, errors.New("not used")
+}
+func (a *errAdapter) Authenticate(ctx context.Context, account string) (forge.Session, error) {
+	return nil, errors.New("not used")
+}
+func (a *errAdapter) Collect(ctx context.Context, s forge.Session, t forge.Target, o forge.CollectOptions) (forge.CollectResult, error) {
+	return forge.CollectResult{}, a.err
+}
+
+// TestWaitFatalErrorFailsFast: a reconcile failure of ErrAuth /
+// ErrNotFound / ErrAccountMismatch / ErrUnsupportedHost during Wait must
+// end the wait immediately, not spin retrying until the deadline. A
+// transient error (ErrIncomplete) must NOT fail fast: it retries until the
+// deadline. The split proves the fatalWaitError classification.
+func TestWaitFatalErrorFailsFast(t *testing.T) {
+	fatal := []struct {
+		name string
+		err  error
+	}{
+		{"ErrAuth", forge.ErrAuth},
+		{"ErrNotFound", forge.ErrNotFound},
+		{"ErrAccountMismatch", forge.ErrAccountMismatch},
+		{"ErrUnsupportedHost", forge.ErrUnsupportedHost},
+	}
+	for _, tc := range fatal {
+		t.Run(tc.name+" fails fast", func(t *testing.T) {
+			e := newEnvAt(t, time.Now().Add(-time.Hour))
+			e.eng.NewAdapter = func(svcs Services) forge.Adapter {
+				return &errAdapter{err: tc.err}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			start := time.Now()
+			_, err := e.eng.Wait(ctx, WaitInput{URL: testURL, Consumer: "c"})
+			elapsed := time.Since(start)
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("wait: expected %v to fail fast, got %v", tc.err, err)
+			}
+			if elapsed >= time.Second {
+				t.Fatalf("wait: took %v, expected immediate failure before the 2s deadline", elapsed)
+			}
+		})
+	}
+
+	t.Run("ErrIncomplete retries until deadline", func(t *testing.T) {
+		e := newEnvAt(t, time.Now().Add(-time.Hour))
+		e.eng.NewAdapter = func(svcs Services) forge.Adapter {
+			return &errAdapter{err: forge.ErrIncomplete}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		start := time.Now()
+		res, err := e.eng.Wait(ctx, WaitInput{URL: testURL, Consumer: "c"})
+		elapsed := time.Since(start)
+		if err != nil {
+			t.Fatalf("wait: transient ErrIncomplete must not fail fast, got %v", err)
+		}
+		if res.Status != StatusTimeout {
+			t.Fatalf("wait status = %s, want timeout (retried until the deadline)", res.Status)
+		}
+		if elapsed < time.Second {
+			t.Fatalf("wait: took %v, expected to run until the 2s deadline", elapsed)
 		}
 	})
 }
