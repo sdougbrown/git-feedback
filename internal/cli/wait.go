@@ -28,13 +28,6 @@ func handleWait(ctx context.Context, inv Invocation) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if inv.Flags["timeout"] == "" {
-		// Apply the pinned default deadline; Run only derives a context
-		// from an explicit --timeout.
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, waitDefaultTimeout)
-		defer cancel()
-	}
 	clk := newClock()
 
 	eng, err := newEngineBase(clk)

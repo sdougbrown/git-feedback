@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 )
 
 func TestRegistryArgvOrdering(t *testing.T) {
@@ -145,6 +146,68 @@ func TestTimeoutOneMillisecondAccepted(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
 	}
+}
+
+func TestWaitDefaultDeadlineApplied(t *testing.T) {
+	// The pinned default deadline (waitDefaultTimeout, 30m) is applied in
+	// Run when --timeout is absent; an explicit --timeout overrides it.
+	// Stubbing the wait handler keeps the test free of store and network
+	// dependencies, and the handler returns immediately so no 30-minute
+	// wait occurs.
+	// Stubbing specs is process-global: safe only because no test in this
+	// package uses t.Parallel(). Keep it that way, or make the stub local.
+
+	t.Run("default deadline when --timeout absent", func(t *testing.T) {
+		var gotCtx context.Context
+		old := specs["wait"]
+		stub := old
+		stub.handle = func(ctx context.Context, inv Invocation) (Result, error) {
+			gotCtx = ctx
+			return Result{Command: "wait", Status: StatusOK}, nil
+		}
+		specs["wait"] = stub
+		t.Cleanup(func() { specs["wait"] = old })
+
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{"wait", "--consumer", "ci", "https://github.com/o/r/pull/1"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
+		}
+		deadline, ok := gotCtx.Deadline()
+		if !ok {
+			t.Fatal("ctx.Deadline() ok = false, want true (default deadline not applied)")
+		}
+		until := time.Until(deadline)
+		if until < 29*time.Minute || until > 31*time.Minute {
+			t.Errorf("default deadline = %v from now, want between 29m and 31m", until)
+		}
+	})
+
+	t.Run("explicit --timeout 5s overrides", func(t *testing.T) {
+		var gotCtx context.Context
+		old := specs["wait"]
+		stub := old
+		stub.handle = func(ctx context.Context, inv Invocation) (Result, error) {
+			gotCtx = ctx
+			return Result{Command: "wait", Status: StatusOK}, nil
+		}
+		specs["wait"] = stub
+		t.Cleanup(func() { specs["wait"] = old })
+
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{"wait", "--timeout", "5s", "--consumer", "ci", "https://github.com/o/r/pull/1"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
+		}
+		deadline, ok := gotCtx.Deadline()
+		if !ok {
+			t.Fatal("ctx.Deadline() ok = false, want true")
+		}
+		until := time.Until(deadline)
+		if until <= 0 || until > 6*time.Second {
+			t.Errorf("explicit deadline = %v from now, want ~5s in (0, 6s]", until)
+		}
+	})
 }
 
 func TestEnvelopeFields(t *testing.T) {

@@ -202,6 +202,13 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		ctx, cancel = context.WithTimeout(ctx, d)
 		defer cancel()
 	}
+	if inv.Command == "wait" && inv.Flags["timeout"] == "" {
+		// Apply the pinned default deadline; an explicit --timeout above
+		// already derived the context.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, waitDefaultTimeout)
+		defer cancel()
+	}
 
 	result, herr := inv.handler(ctx, inv)
 	if herr != nil {
