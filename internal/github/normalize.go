@@ -179,9 +179,6 @@ func (a *Adapter) collectReviews(ctx context.Context, tp *Transport, t forge.Tar
 		if err := json.Unmarshal(raw, &rv); err != nil {
 			return nil, fmt.Errorf("%w: malformed review record: %v", forge.ErrIncomplete, err)
 		}
-		if rv.User == nil {
-			return nil, fmt.Errorf("%w: review %s missing user", forge.ErrIncomplete, strconv.Itoa(rv.ID))
-		}
 		reviews = append(reviews, rv)
 	}
 	return reviews, nil
@@ -198,9 +195,6 @@ func (a *Adapter) collectComments(ctx context.Context, tp *Transport, t forge.Ta
 		var cm restComment
 		if err := json.Unmarshal(raw, &cm); err != nil {
 			return nil, fmt.Errorf("%w: malformed comment record: %v", forge.ErrIncomplete, err)
-		}
-		if cm.User == nil {
-			return nil, fmt.Errorf("%w: comment %s missing user", forge.ErrIncomplete, strconv.Itoa(cm.ID))
 		}
 		comments = append(comments, cm)
 	}
@@ -244,12 +238,13 @@ func normalizeThread(node gqlThreadNode) (*forge.Thread, error) {
 		return nil, fmt.Errorf("%w: thread %s has no root comment", forge.ErrIncomplete, node.ID)
 	}
 	root := node.Comments.Nodes[0]
-	if root.Author == nil {
-		return nil, fmt.Errorf("%w: thread %s root comment missing author", forge.ErrIncomplete, node.ID)
+	rootAuthor := ""
+	if root.Author != nil {
+		rootAuthor = root.Author.Login
 	}
 	ft := &forge.Thread{
 		ID:              node.ID,
-		Author:          root.Author.Login,
+		Author:          rootAuthor,
 		Body:            root.Body,
 		Path:            node.Path,
 		IsOutdated:      node.IsOutdated,
@@ -259,12 +254,13 @@ func normalizeThread(node gqlThreadNode) (*forge.Thread, error) {
 		ft.ResolutionState = "resolved"
 	}
 	for _, c := range node.Comments.Nodes[1:] {
-		if c.Author == nil {
-			return nil, fmt.Errorf("%w: comment %s missing author", forge.ErrIncomplete, c.ID)
+		author := ""
+		if c.Author != nil {
+			author = c.Author.Login
 		}
 		ft.Comments = append(ft.Comments, forge.ThreadComment{
 			ID:        c.ID,
-			Author:    c.Author.Login,
+			Author:    author,
 			Body:      c.Body,
 			CreatedAt: c.CreatedAt,
 		})
@@ -275,9 +271,13 @@ func normalizeThread(node gqlThreadNode) (*forge.Thread, error) {
 // normalizeReview converts a REST review. CommitID is informational only:
 // it is never proof the body was evaluated against that head.
 func normalizeReview(rv restReview) (*forge.Review, error) {
+	author := ""
+	if rv.User != nil {
+		author = rv.User.Login
+	}
 	return &forge.Review{
 		ID:       strconv.Itoa(rv.ID),
-		Author:   rv.User.Login,
+		Author:   author,
 		Body:     rv.Body,
 		State:    rv.State,
 		CommitID: rv.CommitID,
@@ -286,9 +286,13 @@ func normalizeReview(rv restReview) (*forge.Review, error) {
 
 // normalizeComment converts a REST issue comment.
 func normalizeComment(cm restComment) (*forge.Comment, error) {
+	author := ""
+	if cm.User != nil {
+		author = cm.User.Login
+	}
 	return &forge.Comment{
 		ID:        strconv.Itoa(cm.ID),
-		Author:    cm.User.Login,
+		Author:    author,
 		Body:      cm.Body,
 		CreatedAt: cm.CreatedAt,
 	}, nil

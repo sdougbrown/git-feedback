@@ -474,6 +474,47 @@ func gqlThreadsBody(remaining int) string {
 	return `{"data": {"repository": {"pullRequest": {"reviewThreads": {"totalCount": 1, "pageInfo": {"hasNextPage": false, "endCursor": null}, "nodes": [{"id": "T1", "isOutdated": false, "isResolved": false, "path": "a.go", "comments": {"totalCount": 1, "pageInfo": {"hasNextPage": false, "endCursor": null}, "nodes": [{"id": "C1", "body": "root", "createdAt": "2024-01-01T00:00:00Z", "author": {"login": "alice"}}]}}]}}}, "rateLimit": {"remaining": ` + strconv.Itoa(remaining) + `, "limit": 5000, "resetAt": "2030-01-01T00:00:00Z"}}, "errors": null}`
 }
 
+func TestNullAuthorTolerated(t *testing.T) {
+	stub := baseStub(t)
+	// Thread with author: null (deleted account).
+	stub.graphql["threads"] = []string{`{"data": {"repository": {"pullRequest": {"reviewThreads": {"totalCount": 1, "pageInfo": {"hasNextPage": false, "endCursor": null}, "nodes": [{"id": "T1", "isOutdated": false, "isResolved": false, "path": "a.go", "comments": {"totalCount": 1, "pageInfo": {"hasNextPage": false, "endCursor": null}, "nodes": [{"id": "C1", "body": "root", "createdAt": "2024-01-01T00:00:00Z", "author": null}]}}]}}}, "rateLimit": {"remaining": 3990, "limit": 5000, "resetAt": "2030-01-01T00:00:00Z"}}, "errors": null}`}
+	// Review with user: null.
+	stub.rest["reviews"] = []restPageSpec{{body: `[{"id":1,"user":null,"body":"review body","state":"APPROVED","commit_id":"abc"}]`}}
+	// Comment with user: null.
+	stub.rest["comments"] = []restPageSpec{{body: `[{"id":1,"user":null,"body":"comment body","created_at":"2024-01-01T00:00:00Z"}]`}}
+	adapter, sess := newCollectEnv(t, stub)
+
+	inv1, err := adapter.collect(context.Background(), sess.tp, testTarget(t), forge.CollectOptions{})
+	if err != nil {
+		t.Fatalf("collect with null authors must not fail: %v", err)
+	}
+	if len(inv1.Snapshot.Threads) != 1 || len(inv1.Snapshot.Reviews) != 1 || len(inv1.Snapshot.Comments) != 1 {
+		t.Fatalf("want 1/1/1, got %d/%d/%d", len(inv1.Snapshot.Threads), len(inv1.Snapshot.Reviews), len(inv1.Snapshot.Comments))
+	}
+	if inv1.Snapshot.Threads[0].Author != "" {
+		t.Fatalf("null thread author should normalize to empty string, got %q", inv1.Snapshot.Threads[0].Author)
+	}
+	if inv1.Snapshot.Reviews[0].Author != "" {
+		t.Fatalf("null review author should normalize to empty string, got %q", inv1.Snapshot.Reviews[0].Author)
+	}
+	if inv1.Snapshot.Comments[0].Author != "" {
+		t.Fatalf("null comment author should normalize to empty string, got %q", inv1.Snapshot.Comments[0].Author)
+	}
+	// Fingerprint stability: a second collect must produce identical fingerprints.
+	inv2, err := adapter.collect(context.Background(), sess.tp, testTarget(t), forge.CollectOptions{})
+	if err != nil {
+		t.Fatalf("second collect: %v", err)
+	}
+	if len(inv1.Objects) != len(inv2.Objects) {
+		t.Fatalf("object count changed between collects: %d → %d", len(inv1.Objects), len(inv2.Objects))
+	}
+	for i := 1; i < len(inv1.Objects); i++ { // skip synthetic target (no fingerprint)
+		if inv1.Objects[i].Fingerprint != inv2.Objects[i].Fingerprint {
+			t.Fatalf("fingerprint not stable for %s: %s != %s", inv1.Objects[i].ProviderID, inv1.Objects[i].Fingerprint, inv2.Objects[i].Fingerprint)
+		}
+	}
+}
+
 func TestGQLRateLimitAborts(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
