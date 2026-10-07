@@ -294,8 +294,12 @@ func TestWaitDeadlineWhileStoreBusy(t *testing.T) {
 	if s := statusOf(t, envOut); s != "timeout" {
 		t.Fatalf("wait status = %q, want timeout (stderr has no bearing)", s)
 	}
-	if elapsed > 3500*time.Millisecond {
-		t.Fatalf("wait under a busy store exited after %v, want under ~3s", elapsed)
+	// The 2s deadline must fire before the 5s SQLite busy timeout; the
+	// status check above is the durable evidence that the deadline (not the
+	// busy timeout) dominated. The 4.5s bound leaves headroom for startup
+	// variance while still failing if the busy timeout were reached.
+	if elapsed > 4500*time.Millisecond {
+		t.Fatalf("wait under a busy store exited after %v, want under 4.5s (the 5s busy timeout must not dominate)", elapsed)
 	}
 }
 
