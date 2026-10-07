@@ -132,3 +132,12 @@ example `GH_CONFIG_DIR` or `XDG_CONFIG_HOME`, or a selected token variable). Do
 not require optional variables that may be unset; the registry treats a missing
 `env:NAME` as a load error. When integrating callers with different config
 environments, use an explicit `--state-dir` so each caller selects its own store.
+
+## Registry smoke test
+
+`make registry-test` runs the cli-registry smoke gate (`integration/registry_test.go`),
+exercising the shipped manifest through the reference `cli-registry` binary. It is
+kept out of `make verify` because it depends on an external repo. Run it when you
+change the manifest or want to confirm the registry integration end-to-end. It
+builds `cli-registry` from `~/Code/cli-registry` when `CLI_REGISTRY_BIN` is unset;
+set `CLI_REGISTRY_BIN` to use a prebuilt binary instead.
