@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -97,6 +98,8 @@ func TestDispatchUsageErrorsExit2(t *testing.T) {
 		{"missing flag value url-first", []string{"inbox", "https://github.com/o/r/pull/1", "--consumer"}},
 		{"unknown flag url-first", []string{"inbox", "https://github.com/o/r/pull/1", "--bogus"}},
 		{"invalid timeout", []string{"wait", "--timeout", "soon", "https://github.com/o/r/pull/1"}},
+		{"negative timeout", []string{"wait", "--timeout", "-5m", "https://github.com/o/r/pull/1"}},
+		{"zero timeout", []string{"wait", "--timeout", "0s", "https://github.com/o/r/pull/1"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -120,6 +123,25 @@ func TestDispatchUsageErrorsExit2(t *testing.T) {
 				t.Errorf("reviewer_completion = %v, want unknown", envelope["reviewer_completion"])
 			}
 		})
+	}
+}
+
+func TestTimeoutOneMillisecondAccepted(t *testing.T) {
+	// A positive duration, however short, must be accepted rather than
+	// rejected as a usage error; the stub handler keeps the test free of
+	// store and network dependencies.
+	old := specs["wait"]
+	stub := old
+	stub.handle = func(ctx context.Context, inv Invocation) (Result, error) {
+		return Result{Command: "wait", Status: StatusOK}, nil
+	}
+	specs["wait"] = stub
+	t.Cleanup(func() { specs["wait"] = old })
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"wait", "--timeout", "1ms", "https://github.com/o/r/pull/1"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
 	}
 }
 

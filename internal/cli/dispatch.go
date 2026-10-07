@@ -193,7 +193,7 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 
 	if raw := inv.Flags["timeout"]; raw != "" {
 		d, derr := time.ParseDuration(raw)
-		if derr != nil {
+		if derr != nil || d <= 0 {
 			writeResult(stdout, errorResult(inv.Command, &usageError{fmt.Sprintf("invalid --timeout %q", raw)}))
 			fmt.Fprintf(stderr, "invalid --timeout %q\n", raw)
 			return ExitUsage
