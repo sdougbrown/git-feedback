@@ -456,18 +456,30 @@ func TestDeferredReturnsCurrentSnapshot(t *testing.T) {
 
 // TestEngineDefaultsKeepGatesDurable is a smoke check that the engine's
 // default services are the store-backed ones (gates survive a reopen).
-// TestWaitCorruptStoreFailsFast: a corrupt (or newer-schema) store is not
-// transient; wait must surface the store error immediately instead of
-// retrying until the deadline and returning a timeout.
-func TestWaitCorruptStoreFailsFast(t *testing.T) {
+// storeOpenErr mimics the CLI's statusError wrap around a store open
+// failure, so the test exercises the same errors.As path as production.
+type storeOpenErr struct {
+	code string
+	msg  string
+	err  error
+}
+
+func (e *storeOpenErr) Error() string { return e.msg }
+func (e *storeOpenErr) Unwrap() error { return e.err }
+
+// TestWaitStoreOpenErrorPlumbing: a corrupt (or newer-schema) store is not
+// transient; wait must surface the store error immediately. A transient
+// CodeStore lock-contention error must be retried, not fail fast.
+func TestWaitStoreOpenErrorPlumbing(t *testing.T) {
 	e := newEnv(t)
 	e.eng.Clock = nil // real clock: the retry backoff actually elapses
+
 	for _, code := range []string{store.CodeStoreCorrupt, store.CodeStoreNewer} {
-		t.Run(code, func(t *testing.T) {
+		t.Run(code+" fails fast", func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 			defer cancel()
 			e.eng.OpenStore = func(busy time.Duration) (*store.Store, error) {
-				return nil, &store.Error{Code: code, Message: "injected open failure"}
+				return nil, &storeOpenErr{code: "store_error", msg: "injected", err: &store.Error{Code: code, Message: "injected open failure"}}
 			}
 			start := time.Now()
 			_, err := e.eng.Wait(ctx, WaitInput{URL: testURL, Consumer: "c"})
@@ -480,6 +492,26 @@ func TestWaitCorruptStoreFailsFast(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("CodeStore retries", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		attempts := 0
+		e.eng.OpenStore = func(busy time.Duration) (*store.Store, error) {
+			attempts++
+			return nil, &storeOpenErr{code: "store_error", msg: "lock contention", err: &store.Error{Code: store.CodeStore, Message: "lock contention"}}
+		}
+		_, err := e.eng.Wait(ctx, WaitInput{URL: testURL, Consumer: "c"})
+		// Must not fail fast: the store error must not surface directly.
+		var se *store.Error
+		if errors.As(err, &se) {
+			t.Fatalf("wait: transient CodeStore must not fail fast, got %v", err)
+		}
+		// Must have retried at least twice before the deadline.
+		if attempts < 2 {
+			t.Fatalf("wait: attempts = %d, want >= 2 (retry must bite)", attempts)
+		}
+	})
 }
 
 func TestEngineDefaultsKeepGatesDurable(t *testing.T) {
