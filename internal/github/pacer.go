@@ -29,7 +29,9 @@ func NewFixedPacer(clk clock.Clock, interval time.Duration) *FixedPacer {
 	return &FixedPacer{Clock: clk, Interval: interval}
 }
 
-// Wait implements RequestPacer.
+// Wait implements RequestPacer. A spacing window that outlives the
+// caller's deadline is capped at the remaining deadline, so the sleep can
+// never outlive it.
 func (p *FixedPacer) Wait(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -43,6 +45,12 @@ func (p *FixedPacer) Wait(ctx context.Context) error {
 	}
 	p.mu.Unlock()
 	if wait > 0 {
+		if deadline, ok := ctx.Deadline(); ok {
+			if remain := time.Until(deadline); remain < wait {
+				p.Clock.Sleep(remain)
+				return ctx.Err()
+			}
+		}
 		p.Clock.Sleep(wait)
 	}
 	if err := ctx.Err(); err != nil {

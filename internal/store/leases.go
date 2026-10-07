@@ -222,7 +222,10 @@ func (p *Pacer) claim(ctx context.Context) (time.Time, error) {
 }
 
 // Wait implements github.RequestPacer. It blocks until the scope's next
-// allowed request time using the injected clock.
+// allowed request time using the injected clock. A pacing window that
+// outlives the caller's deadline (a stale pace row left behind by a clock
+// correction) is capped at the remaining deadline, so the sleep can never
+// outlive it.
 func (p *Pacer) Wait(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -232,6 +235,12 @@ func (p *Pacer) Wait(ctx context.Context) error {
 		return err
 	}
 	if d := next.Sub(p.clk.Now()); d > 0 {
+		if deadline, ok := ctx.Deadline(); ok {
+			if remain := time.Until(deadline); remain < d {
+				p.clk.Sleep(remain)
+				return ctx.Err()
+			}
+		}
 		p.clk.Sleep(d)
 	}
 	return ctx.Err()

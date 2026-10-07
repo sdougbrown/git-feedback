@@ -89,7 +89,7 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 	}
 	clk := e.clock()
 
-	eng, closeStore, err := e.openStoreResilient(ctx, clk, remainingOf(ctx))
+	eng, closeStore, err := e.openStoreResilient(ctx, clk)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return e.timeoutResult(e, target, "", in, nil), nil
@@ -98,24 +98,28 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 	}
 	defer closeStore()
 
-	// Resolve the backlog pre-check account only from explicit input or an
-	// unambiguous stored stream; ambiguity defers to authentication.
+	// The backlog account comes from explicit input or an unambiguous
+	// stored stream; ambiguity defers to authentication, never guessing.
 	account := forge.CanonicalAccount(in.Account)
-	if account == "" {
-		accounts, aerr := eng.Store.AccountsForTarget(ctx, target.ID)
-		if aerr != nil && !isStoreOpenError(aerr) {
-			return WaitResult{}, aerr
-		}
-		if len(accounts) == 1 {
-			account = accounts[0]
-		}
-	}
 
 	var (
 		session     forge.Session
 		lastAttempt *store.Attempt
 	)
 	for {
+		if account == "" {
+			// Re-resolve while unknown: a concurrent collector may create
+			// the stream mid-wait, and busy or pre-verification deferred
+			// cycles carry no account to adopt.
+			accounts, aerr := eng.Store.AccountsForTarget(ctx, target.ID)
+			if aerr != nil && !isStoreOpenError(aerr) {
+				return WaitResult{}, aerr
+			}
+			if len(accounts) == 1 {
+				account = accounts[0]
+			}
+		}
+
 		// Inbox check: no authentication, no GitHub requests.
 		if account != "" {
 			res, done, err := e.backlog(ctx, eng, target, account, in)
@@ -303,10 +307,11 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 }
 
 // openStoreResilient opens the invocation's store, retrying transient open
-// failures (concurrent access) until the deadline.
-func (e *Engine) openStoreResilient(ctx context.Context, clk clock.Clock, remaining time.Duration) (*Engine, func(), error) {
+// failures (concurrent access) until the deadline. The remaining deadline
+// is recomputed per retry, so a store's lock waits can never outlive it.
+func (e *Engine) openStoreResilient(ctx context.Context, clk clock.Clock) (*Engine, func(), error) {
 	for {
-		eng, closeStore, err := e.storeFor(clk, remaining)
+		eng, closeStore, err := e.storeFor(clk, remainingOf(ctx))
 		if err == nil {
 			return eng, closeStore, nil
 		}
