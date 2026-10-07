@@ -130,6 +130,8 @@ func TestTimeoutOneMillisecondAccepted(t *testing.T) {
 	// A positive duration, however short, must be accepted rather than
 	// rejected as a usage error; the stub handler keeps the test free of
 	// store and network dependencies.
+	// Stubbing specs is process-global: safe only because no test in this
+	// package uses t.Parallel(). Keep it that way, or make the stub local.
 	old := specs["wait"]
 	stub := old
 	stub.handle = func(ctx context.Context, inv Invocation) (Result, error) {

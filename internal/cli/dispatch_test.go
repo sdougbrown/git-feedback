@@ -17,6 +17,8 @@ import (
 func TestSignalPendingAfterHandlerWinsExitCode(t *testing.T) {
 	// A handler that succeeds, so the injected signal is the only thing
 	// that should drive the exit code.
+	// Stubbing specs is process-global: safe only because no test in this
+	// package uses t.Parallel(). Keep it that way, or make the stub local.
 	old := specs["reconcile"]
 	stub := old
 	stub.handle = func(ctx context.Context, inv Invocation) (Result, error) {
