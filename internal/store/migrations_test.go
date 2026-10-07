@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,9 +104,11 @@ func TestOpenLockedStoreRealBusyIsRetriable(t *testing.T) {
 		t.Fatalf("begin A: %v", err)
 	}
 
-	// Connection B uses a zero busy timeout so the contended write fails
-	// immediately with the driver's own SQLITE_BUSY error.
-	dbB, err := sql.Open("sqlite", dsn(path, 0))
+	// Connection B bypasses the dsn guard (which maps <= 0 to the 5000ms
+	// default) so the contended write fails immediately with the driver's
+	// own SQLITE_BUSY error instead of blocking 5s.
+	dsnB := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(0)&_pragma=foreign_keys(1)", path)
+	dbB, err := sql.Open("sqlite", dsnB)
 	if err != nil {
 		t.Fatalf("open B: %v", err)
 	}
