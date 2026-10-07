@@ -127,7 +127,7 @@ func localEnvelope(ctx context.Context, command string, st *store.Store, clk clo
 		r.ObservedHead = &head
 		r.Freshness = Freshness{
 			SnapshotObservedAt: stamp(sum.ObservedAt),
-			Stale:              !sum.ObservedAt.IsZero() && clk.Now().Sub(sum.ObservedAt) > tracker.DefaultMinInterval,
+			Stale:              tracker.IsStale(sum.ObservedAt, clk.Now(), tracker.DefaultMinInterval),
 		}
 	}
 	if att, ok, err := st.LatestAttempt(ctx, t.ID, account); err != nil {

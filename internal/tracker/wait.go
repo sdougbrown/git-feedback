@@ -285,7 +285,7 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 		res.Freshness.Stale = res.ObservedHead != in.Head
 	} else {
 		_, _, min := e.durations()
-		res.Freshness.Stale = ok && !sum.ObservedAt.IsZero() && e.clock().Now().Sub(sum.ObservedAt) > min
+		res.Freshness.Stale = ok && IsStale(sum.ObservedAt, e.clock().Now(), min)
 	}
 	return res, true, nil
 }

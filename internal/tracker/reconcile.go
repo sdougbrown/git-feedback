@@ -130,6 +130,13 @@ func (e *Engine) durations() (ttl, refresh, min time.Duration) {
 	return ttl, refresh, min
 }
 
+// IsStale reports whether a snapshot observed at observedAt is stale relative
+// to now under a minimum observation interval. A zero observedAt is never
+// stale.
+func IsStale(observedAt, now time.Time, minInterval time.Duration) bool {
+	return !observedAt.IsZero() && now.Sub(observedAt) > minInterval
+}
+
 // services returns the scope-bound collection services.
 func (e *Engine) services(host, account string) Services {
 	if e.NewServices != nil {
@@ -383,7 +390,7 @@ func (e *Engine) freshness(ctx context.Context, targetID, account string) Freshn
 	_, min, _ := e.durations()
 	return Freshness{
 		SnapshotObservedAt: sum.ObservedAt,
-		Stale:              !sum.ObservedAt.IsZero() && e.Clock.Now().Sub(sum.ObservedAt) > min,
+		Stale:              IsStale(sum.ObservedAt, e.Clock.Now(), min),
 	}
 }
 

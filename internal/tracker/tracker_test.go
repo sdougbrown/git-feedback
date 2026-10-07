@@ -613,3 +613,24 @@ func TestInjectedGateNoSplitBrain(t *testing.T) {
 		t.Fatalf("status = %s, want updated/unchanged", res.Status)
 	}
 }
+
+func TestIsStale(t *testing.T) {
+	now := time.Now()
+	min := 60 * time.Second
+	cases := []struct {
+		name       string
+		observedAt time.Time
+		want       bool
+	}{
+		{"zero observedAt", time.Time{}, false},
+		{"within interval", now.Add(-30 * time.Second), false},
+		{"beyond interval", now.Add(-2 * time.Minute), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsStale(tc.observedAt, now, min); got != tc.want {
+				t.Fatalf("IsStale = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
