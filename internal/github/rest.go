@@ -97,13 +97,15 @@ func (a *Adapter) restPaginate(ctx context.Context, tp *Transport, firstURL stri
 // nextLink extracts the rel="next" target from a Link header.
 func nextLink(link string) string {
 	for _, part := range strings.Split(link, ",") {
-		target := ""
+		open := strings.Index(part, "<")
+		closed := strings.LastIndex(part, ">")
+		if open < 0 || closed < open {
+			continue
+		}
+		target := part[open+1 : closed]
 		isNext := false
 		for _, seg := range strings.Split(part, ";") {
-			seg = strings.TrimSpace(seg)
-			if strings.HasPrefix(seg, "<") && strings.HasSuffix(seg, ">") {
-				target = strings.Trim(seg, "<>")
-			} else if seg == `rel="next"` {
+			if strings.TrimSpace(seg) == `rel="next"` {
 				isNext = true
 			}
 		}

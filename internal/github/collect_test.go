@@ -447,6 +447,48 @@ func TestAbsoluteNextLinkSelf(t *testing.T) {
 	}
 }
 
+func TestNextLinkSemicolonInQuery(t *testing.T) {
+	// A rel="next" target whose query value contains a semicolon must
+	// still be parsed; otherwise pagination silently terminates and a
+	// partial collection is reported as complete.
+	stub := baseStub(t)
+	standardThreads(t, stub)
+	stub.rest["reviews"] = []restPageSpec{{body: "[]"}}
+	stub.rest["comments"] = []restPageSpec{
+		{body: `[{"id":1,"user":{"login":"bob"},"body":"first","created_at":"2024-01-01T00:00:00Z"}]`, link: `</issues/7/comments?page=2&x=a;b>; rel="next"`},
+		{body: `[{"id":2,"user":{"login":"eve"},"body":"second","created_at":"2024-01-02T00:00:00Z"}]`},
+	}
+	adapter, sess := newCollectEnv(t, stub)
+
+	inv, err := adapter.collect(context.Background(), sess.tp, testTarget(t), forge.CollectOptions{})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if len(inv.Snapshot.Comments) != 2 {
+		t.Fatalf("want 2 comments (page 2 must be fetched), got %d", len(inv.Snapshot.Comments))
+	}
+}
+
+func TestNextLinkMalformedNoClosingBracket(t *testing.T) {
+	// A part with an opening bracket but no closing bracket carries no
+	// target and must be treated as having no next link.
+	stub := baseStub(t)
+	standardThreads(t, stub)
+	stub.rest["reviews"] = []restPageSpec{{body: "[]"}}
+	stub.rest["comments"] = []restPageSpec{
+		{body: `[{"id":1,"user":{"login":"bob"},"body":"first","created_at":"2024-01-01T00:00:00Z"}]`, link: `</issues/7/comments?page=2; rel="next"`},
+	}
+	adapter, sess := newCollectEnv(t, stub)
+
+	inv, err := adapter.collect(context.Background(), sess.tp, testTarget(t), forge.CollectOptions{})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if len(inv.Snapshot.Comments) != 1 {
+		t.Fatalf("want 1 comment (malformed link must not paginate), got %d", len(inv.Snapshot.Comments))
+	}
+}
+
 func TestAbsoluteNextLinkCrossHost(t *testing.T) {
 	// An absolute rel="next" target pointing at a different host must fail
 	// the attempt rather than yield a smaller inventory.
