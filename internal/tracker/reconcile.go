@@ -313,12 +313,13 @@ func (e *Engine) publish(ctx context.Context, target forge.Target, host, account
 	if err != nil {
 		// The publication (and with it the finalization) rolled back. The
 		// fence may still hold; finalize as a failure so cadence advances.
-		att := e.finalizeFenced(ctx, host, account, token, streamID, store.AttemptInput{
+		// The attempt row is persisted by finalizeFenced; the error path
+		// carries no attempt envelope, so the result is discarded.
+		e.finalizeFenced(ctx, host, account, token, streamID, store.AttemptInput{
 			Outcome:   store.OutcomeFailed,
 			ErrorCode: errorCode(err),
 			NextDue:   nextDue,
 		})
-		_ = att
 		return Result{}, err
 	}
 	status := StatusUpdated
