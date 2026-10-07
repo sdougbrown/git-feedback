@@ -97,3 +97,16 @@ func CrashBeforeOutput() {
 		panic("GIT_FEEDBACK_CRASH_AT=before_output")
 	}
 }
+
+// testPendingSignal is a test-only injection: when non-nil, Run injects it
+// into the signal channel before the envelope write, exercising the
+// post-write signal re-check. Only exists in testhooks builds.
+var testPendingSignal os.Signal
+
+// testPendingSignalFn returns the pending signal to inject, if a test set it.
+func testPendingSignalFn() (os.Signal, bool) {
+	if testPendingSignal == nil {
+		return nil, false
+	}
+	return testPendingSignal, true
+}

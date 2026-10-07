@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"os"
 	"time"
 
 	"github.com/sdougbrown/git-feedback/internal/github"
@@ -30,3 +31,6 @@ func (TestHooks) ApplyStoreCrash(*store.Store) {}
 
 // CrashBeforeOutput is a no-op in the default build.
 func CrashBeforeOutput() {}
+
+// testPendingSignalFn is a nil-safe no-op in the default build.
+func testPendingSignalFn() (os.Signal, bool) { return nil, false }
