@@ -411,11 +411,12 @@ func remainingOf(ctx context.Context) time.Duration {
 	return d
 }
 
-// isStoreOpenError reports whether err is the store's open/integrity
-// failure, which is transient under concurrent access.
+// isStoreOpenError reports whether err is the store's lock-contention
+// failure, which is transient under concurrent access. A corrupt or
+// newer-schema store is not transient: it fails fast.
 func isStoreOpenError(err error) bool {
 	var se *store.Error
-	return errors.As(err, &se) && (se.Code == store.CodeStore || se.Code == store.CodeStoreCorrupt)
+	return errors.As(err, &se) && se.Code == store.CodeStore
 }
 
 // fatalWaitError reports whether one reconciliation failure must end the

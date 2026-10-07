@@ -456,6 +456,32 @@ func TestDeferredReturnsCurrentSnapshot(t *testing.T) {
 
 // TestEngineDefaultsKeepGatesDurable is a smoke check that the engine's
 // default services are the store-backed ones (gates survive a reopen).
+// TestWaitCorruptStoreFailsFast: a corrupt (or newer-schema) store is not
+// transient; wait must surface the store error immediately instead of
+// retrying until the deadline and returning a timeout.
+func TestWaitCorruptStoreFailsFast(t *testing.T) {
+	e := newEnv(t)
+	e.eng.Clock = nil // real clock: the retry backoff actually elapses
+	for _, code := range []string{store.CodeStoreCorrupt, store.CodeStoreNewer} {
+		t.Run(code, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+			e.eng.OpenStore = func(busy time.Duration) (*store.Store, error) {
+				return nil, &store.Error{Code: code, Message: "injected open failure"}
+			}
+			start := time.Now()
+			_, err := e.eng.Wait(ctx, WaitInput{URL: testURL, Consumer: "c"})
+			var se *store.Error
+			if !errors.As(err, &se) || se.Code != code {
+				t.Fatalf("wait: expected %s to fail fast, got %v", code, err)
+			}
+			if elapsed := time.Since(start); elapsed >= 400*time.Millisecond {
+				t.Fatalf("wait: took %v, expected immediate failure before the deadline", elapsed)
+			}
+		})
+	}
+}
+
 func TestEngineDefaultsKeepGatesDurable(t *testing.T) {
 	e := newEnv(t)
 	e.reconcile(ReconcileInput{URL: testURL})
