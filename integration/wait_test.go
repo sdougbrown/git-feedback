@@ -384,3 +384,51 @@ func TestWaitHonorsPersistedRateGate(t *testing.T) {
 		t.Fatalf("wait status = %q, want timeout", s)
 	}
 }
+
+// TestWaitExcludeSelf: default wait delivery excludes the stream's own
+// account's self-authored objects; --exclude-self restores them. The
+// backlog is delivered without running a cycle, so no bootstrap lease is
+// needed. Reading never acknowledges, so the second run (with the flag)
+// sees the full unfiltered backlog — the designed behavior.
+func TestWaitExcludeSelf(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, nil)
+	dir := testState(t)
+	publishMixed(t, dir, "alice")
+
+	// Default: the account's own objects are filtered; the rev-authored
+	// comment and the target event are delivered.
+	envOut := runOK(t, env, 30*time.Second, waitArgs(dir, "--timeout", "5s")...)
+	if s := statusOf(t, envOut); s != "events" {
+		t.Fatalf("wait status = %q, want events", s)
+	}
+	authors := eventAuthors(t, envOut)
+	for _, a := range authors {
+		if a == "alice" {
+			t.Fatalf("event has author alice, want filtered (authors: %v)", authors)
+		}
+	}
+	if len(authors) != 2 {
+		t.Fatalf("events = %d, want 2 (target + rev comment)", len(authors))
+	}
+
+	// --exclude-self: the account's own objects are restored. Reading never
+	// acknowledges, so the same consumer sees the full unfiltered backlog.
+	envOut = runOK(t, env, 30*time.Second, waitArgs(dir, "--timeout", "5s", "--exclude-self")...)
+	if s := statusOf(t, envOut); s != "events" {
+		t.Fatalf("wait status = %q, want events", s)
+	}
+	authors = eventAuthors(t, envOut)
+	hasOwn := false
+	for _, a := range authors {
+		if a == "alice" {
+			hasOwn = true
+		}
+	}
+	if !hasOwn {
+		t.Fatalf("--exclude-self did not restore the account's own objects (authors: %v)", authors)
+	}
+	if len(authors) != 3 {
+		t.Fatalf("events = %d, want 3 (target + own + rev)", len(authors))
+	}
+}

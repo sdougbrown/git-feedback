@@ -24,6 +24,10 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/sdougbrown/git-feedback/internal/forge"
+	"github.com/sdougbrown/git-feedback/internal/github"
+	"github.com/sdougbrown/git-feedback/internal/store"
 )
 
 // repoRoot is the repository root, derived from this file's location.
@@ -447,6 +451,40 @@ func initStore(t *testing.T, env []string, dir string) {
 	_ = runCLI(ctx, t, filepath.Join(repoRoot, "bin", "git-feedback-test"), env, inboxArgs(dir)...)
 }
 
+// publishMixed publishes a mixed-author snapshot directly into the store:
+// the stream account authors one comment and "rev" authors another, so the
+// self filter has something to catch. It opens the store's database
+// directly (the integration harness has no in-process store handle), so the
+// published backlog is delivered by a later wait without a cycle.
+func publishMixed(t *testing.T, dir, account string) {
+	t.Helper()
+	st, err := store.Open(dir, store.Options{})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	target, err := github.ParseTarget(testURL)
+	if err != nil {
+		t.Fatalf("parse target: %v", err)
+	}
+	now := time.Now()
+	if _, err := st.Publish(context.Background(), store.PublishInput{
+		Target:  target,
+		Account: account,
+		Snapshot: &forge.Snapshot{
+			Head:           "h1",
+			CollectedStart: now,
+			CollectedEnd:   now,
+			Comments: []forge.Comment{
+				{ID: "C1", Author: account, Body: "own comment", CreatedAt: now},
+				{ID: "C2", Author: "rev", Body: "rev comment", CreatedAt: now},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+}
+
 // holdWriteLock opens the store's database directly and holds a write
 // transaction (BEGIN IMMEDIATE) until the returned release function runs.
 func holdWriteLock(t *testing.T, dir string) func() {
@@ -499,4 +537,23 @@ func eventKinds(t *testing.T, env map[string]json.RawMessage) []string {
 		kinds = append(kinds, ev.Kind)
 	}
 	return kinds
+}
+
+// eventAuthors returns the author of each event in the envelope's events
+// array; an empty string marks a target or legacy event (no author).
+func eventAuthors(t *testing.T, env map[string]json.RawMessage) []string {
+	t.Helper()
+	var evs []map[string]json.RawMessage
+	if err := json.Unmarshal(env["events"], &evs); err != nil {
+		t.Fatalf("decode events: %v (%v)", err, env["events"])
+	}
+	authors := make([]string, 0, len(evs))
+	for _, ev := range evs {
+		var a string
+		if raw, ok := ev["author"]; ok {
+			_ = json.Unmarshal(raw, &a)
+		}
+		authors = append(authors, a)
+	}
+	return authors
 }
