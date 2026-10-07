@@ -34,12 +34,9 @@ type restComment struct {
 
 // restHead reads the pull request head SHA from GET pulls/N.
 func (a *Adapter) restHead(ctx context.Context, tp *Transport, t forge.Target) (string, error) {
-	status, _, body, info, hasInfo, err := tp.Get(ctx, headPath(t), nil)
+	status, _, body, _, _, err := tp.Get(ctx, headPath(t), nil)
 	if err != nil {
 		return "", fmt.Errorf("%w: head read failed: %v", forge.ErrIncomplete, err)
-	}
-	if hasInfo {
-		a.gate.Record(info)
 	}
 	if status != http.StatusOK {
 		return "", fmt.Errorf("%w: head read returned HTTP %d", forge.ErrIncomplete, status)
@@ -91,7 +88,6 @@ func (a *Adapter) collectThreads(ctx context.Context, tp *Transport, t forge.Tar
 			return nil, fmt.Errorf("%w: threads query failed: %v", forge.ErrIncomplete, err)
 		}
 		if hasInfo {
-			a.gate.Record(info)
 			st.rates = append(st.rates, info)
 		}
 		if len(gqlErrs) > 0 {
@@ -148,7 +144,6 @@ func (a *Adapter) fillThreadComments(ctx context.Context, tp *Transport, node gq
 			return node, fmt.Errorf("%w: nested comments query failed: %v", forge.ErrIncomplete, err)
 		}
 		if hasInfo {
-			a.gate.Record(info)
 			st.rates = append(st.rates, info)
 		}
 		if len(gqlErrs) > 0 {
