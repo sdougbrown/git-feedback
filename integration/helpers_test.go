@@ -260,6 +260,20 @@ func (s *ghStub) bump(key string) {
 	s.log = append(s.log, stubHit{key, time.Now()})
 }
 
+// collectionTimesSince returns the timestamps of the requests for the
+// given endpoint key that occurred after the given time, in order.
+func (s *ghStub) collectionTimesSince(key string, since time.Time) []time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []time.Time
+	for _, e := range s.log {
+		if e.key == key && e.at.After(since) {
+			out = append(out, e.at)
+		}
+	}
+	return out
+}
+
 // timeline returns the stub's request log as "key@offset" strings relative
 // to the first recorded request, for pacing diagnostics.
 func timeline(t *testing.T, stub *ghStub) []string {

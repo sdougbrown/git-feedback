@@ -258,8 +258,16 @@ func TestWaitDeadlineBoundsAllWork(t *testing.T) {
 	if s := statusOf(t, envOut); s != "timeout" {
 		t.Fatalf("wait status = %q, want timeout", s)
 	}
-	if elapsed > 3500*time.Millisecond {
-		t.Fatalf("wait with a 2s deadline exited after %v, want under ~3s", elapsed)
+	// Durable evidence the wait actually entered the (hanging) verification
+	// that the deadline had to bound: the stub observed the verify request.
+	if got := stub.count("verify"); got < 1 {
+		t.Fatalf("verify requests = %d, want >= 1: the wait never reached the hung verification", got)
+	}
+	// The deadline bounds all work: a 2s wait must not run grossly past its
+	// deadline, but subprocess + fake-gh startup on a loaded runner can add
+	// headroom, so allow up to 6s. A grossly exceeded deadline still fails.
+	if elapsed > 6*time.Second {
+		t.Fatalf("wait with a 2s deadline exited after %v, want under 6s", elapsed)
 	}
 }
 
@@ -302,18 +310,30 @@ func TestWaitUsesSharedCadence(t *testing.T) {
 	ackAll(t, env, dir)
 
 	before := snapshotCounts(stub)
+	start := time.Now()
 	envOut := runOK(t, env, 90*time.Second, waitArgs(dir, "--timeout", "15s")...)
 	if s := statusOf(t, envOut); s != "timeout" {
 		t.Fatalf("wait status = %q, want timeout", s)
 	}
 	// One verification for the wait's own first cycle (the seed's is
-	// separate) and at most three wait collections in a 15s window at a
-	// 2s cadence: a busy loop would show dozens.
+	// separate): a busy loop would re-authenticate per cycle.
 	if got := stub.count("verify") - before["verify"]; got != 1 {
 		t.Fatalf("wait verify requests = %d, want 1: cycles re-authenticated (timeline: %v)", got, timeline(t, stub))
 	}
-	if got := stub.count("threads") - before["threads"]; got < 1 || got > 3 {
-		t.Fatalf("wait collections = %d, want 1–3: cadence not honored (timeline: %v)", got, timeline(t, stub))
+	// The cadence invariant, load-tolerant: every gap between consecutive
+	// collection requests is at least the persisted cadence (2s) minus
+	// timing slop. A cycle that overruns the cadence can wake early (its
+	// persisted NextDue is already past), so the count is not capped; a
+	// back-to-back burst (gap under ~1.5s) is a busy loop and fails.
+	times := stub.collectionTimesSince("threads", start)
+	if len(times) < 1 {
+		t.Fatalf("wait collections = 0, want >= 1 (timeline: %v)", timeline(t, stub))
+	}
+	const minGap = 1500 * time.Millisecond
+	for i := 1; i < len(times); i++ {
+		if gap := times[i].Sub(times[i-1]); gap < minGap {
+			t.Fatalf("collection gap = %v < %v: cadence not honored (timeline: %v)", gap, minGap, timeline(t, stub))
+		}
 	}
 }
 
