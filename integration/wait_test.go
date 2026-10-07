@@ -303,10 +303,13 @@ func TestWaitDeadlineWhileStoreBusy(t *testing.T) {
 	}
 }
 
-// TestWaitUsesSharedCadence: repeated wait cycles honor the persisted
-// cadence (no busy-looping) and reuse the verified session instead of
-// re-admitting per cycle.
-func TestWaitUsesSharedCadence(t *testing.T) {
+// runSharedCadenceScenario runs the shared prefix for cadence and
+// session-reuse tests: seed, ack, then a wait with the given timeout.
+// It asserts the wait exits with timeout status and that exactly one
+// verify request was made (session reuse). It returns the envelope, the
+// stub, the pre-wait snapshot, and the start time for timing assertions.
+func runSharedCadenceScenario(t *testing.T, timeout string) (map[string]json.RawMessage, *ghStub, map[string]int, time.Time) {
+	t.Helper()
 	stub := newStub(t)
 	env := testEnv(fakeGHPath(t), stub.srv.URL, map[string]string{"GIT_FEEDBACK_MIN_INTERVAL": "2s"})
 	dir := testState(t)
@@ -315,7 +318,7 @@ func TestWaitUsesSharedCadence(t *testing.T) {
 
 	before := snapshotCounts(stub)
 	start := time.Now()
-	envOut := runOK(t, env, 90*time.Second, waitArgs(dir, "--timeout", "15s")...)
+	envOut := runOK(t, env, 90*time.Second, waitArgs(dir, "--timeout", timeout)...)
 	if s := statusOf(t, envOut); s != "timeout" {
 		t.Fatalf("wait status = %q, want timeout", s)
 	}
@@ -324,6 +327,15 @@ func TestWaitUsesSharedCadence(t *testing.T) {
 	if got := stub.count("verify") - before["verify"]; got != 1 {
 		t.Fatalf("wait verify requests = %d, want 1: cycles re-authenticated (timeline: %v)", got, timeline(t, stub))
 	}
+	return envOut, stub, before, start
+}
+
+// TestWaitUsesSharedCadence: repeated wait cycles honor the persisted
+// cadence (no busy-looping) and reuse the verified session instead of
+// re-admitting per cycle.
+func TestWaitUsesSharedCadence(t *testing.T) {
+	_, stub, _, start := runSharedCadenceScenario(t, "15s")
+
 	// The cadence invariant, load-tolerant: every gap between consecutive
 	// collection requests is at least the persisted cadence (2s) minus
 	// timing slop. A cycle that overruns the cadence can wake early (its
@@ -344,20 +356,8 @@ func TestWaitUsesSharedCadence(t *testing.T) {
 // TestWaitReusesVerifiedSession: the wait's first cycle verifies once; every
 // later cycle in the same invocation collects without re-verifying.
 func TestWaitReusesVerifiedSession(t *testing.T) {
-	stub := newStub(t)
-	env := testEnv(fakeGHPath(t), stub.srv.URL, map[string]string{"GIT_FEEDBACK_MIN_INTERVAL": "2s"})
-	dir := testState(t)
-	seedPublished(t, env, dir)
-	ackAll(t, env, dir)
+	_, stub, before, _ := runSharedCadenceScenario(t, "14s")
 
-	before := snapshotCounts(stub)
-	envOut := runOK(t, env, 90*time.Second, waitArgs(dir, "--timeout", "14s")...)
-	if s := statusOf(t, envOut); s != "timeout" {
-		t.Fatalf("wait status = %q, want timeout", s)
-	}
-	if got := stub.count("verify") - before["verify"]; got != 1 {
-		t.Fatalf("wait verification requests = %d, want exactly 1 across all cycles (counts: %v)", got, snapshotCounts(stub))
-	}
 	if got := stub.count("threads") - before["threads"]; got < 2 {
 		t.Fatalf("wait completed %d collections, want at least 2 (the second reusing the session) (counts: %v)", got, snapshotCounts(stub))
 	}
