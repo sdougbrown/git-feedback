@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "tools": {
+    "reconcile": {
+      "description": "Run one read-only reconciliation cycle for a GitHub PR and return a compact status, snapshot, and scheduling metadata.",
+      "command": ["git-feedback", "reconcile", "--json"],
+      "timeout": "120s",
+      "env": { "HOME": "env:HOME", "PATH": "env:PATH" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "minLength": 1 },
+          "head": { "type": "string" },
+          "account": { "type": "string" },
+          "state_dir": { "type": "string" }
+        },
+        "required": ["url"],
+        "additionalProperties": false
+      },
+      "bindings": [
+        { "property": "url", "style": "positional" },
+        { "property": "head", "style": "equals", "flag": "--head" },
+        { "property": "account", "style": "equals", "flag": "--account" },
+        { "property": "state_dir", "style": "equals", "flag": "--state-dir" }
+      ],
+      "output": { "mode": "json", "success_exit_codes": [0, 1] }
+    },
+    "snapshot": {
+      "description": "Export one stored immutable snapshot to a private file and return its ID, path, counts, and digest.",
+      "command": ["git-feedback", "snapshot", "--json"],
+      "timeout": "30s",
+      "env": { "HOME": "env:HOME", "PATH": "env:PATH" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "minLength": 1 },
+          "snapshot": { "type": "string", "minLength": 1 },
+          "output_file": { "type": "string", "minLength": 1 },
+          "account": { "type": "string" },
+          "state_dir": { "type": "string" }
+        },
+        "required": ["url", "snapshot", "output_file"],
+        "additionalProperties": false
+      },
+      "bindings": [
+        { "property": "url", "style": "positional" },
+        { "property": "snapshot", "style": "equals", "flag": "--snapshot" },
+        { "property": "output_file", "style": "equals", "flag": "--output" },
+        { "property": "account", "style": "equals", "flag": "--account" },
+        { "property": "state_dir", "style": "equals", "flag": "--state-dir" }
+      ],
+      "output": { "mode": "json", "success_exit_codes": [0, 1] }
+    },
+    "inbox": {
+      "description": "Read unacknowledged events for one target and consumer, with cursor pagination. Reading acknowledges nothing.",
+      "command": ["git-feedback", "inbox", "--json"],
+      "timeout": "30s",
+      "env": { "HOME": "env:HOME", "PATH": "env:PATH" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "minLength": 1 },
+          "consumer": { "type": "string", "minLength": 1 },
+          "account": { "type": "string" },
+          "state_dir": { "type": "string" },
+          "limit": { "type": "integer", "maximum": 200 },
+          "after": { "type": "string" }
+        },
+        "required": ["url", "consumer"],
+        "additionalProperties": false
+      },
+      "bindings": [
+        { "property": "url", "style": "positional" },
+        { "property": "consumer", "style": "equals", "flag": "--consumer" },
+        { "property": "account", "style": "equals", "flag": "--account" },
+        { "property": "state_dir", "style": "equals", "flag": "--state-dir" },
+        { "property": "limit", "style": "equals", "flag": "--limit" },
+        { "property": "after", "style": "equals", "flag": "--after" }
+      ],
+      "output": { "mode": "json", "success_exit_codes": [0, 1] }
+    },
+    "ack": {
+      "description": "Acknowledge exactly the supplied event IDs for one target and consumer, transactionally and idempotently.",
+      "command": ["git-feedback", "ack", "--json"],
+      "timeout": "30s",
+      "env": { "HOME": "env:HOME", "PATH": "env:PATH" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "minLength": 1 },
+          "consumer": { "type": "string", "minLength": 1 },
+          "event": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "account": { "type": "string" },
+          "state_dir": { "type": "string" }
+        },
+        "required": ["url", "consumer", "event"],
+        "additionalProperties": false
+      },
+      "bindings": [
+        { "property": "url", "style": "positional" },
+        { "property": "consumer", "style": "equals", "flag": "--consumer" },
+        { "property": "event", "style": "equals", "flag": "--event" },
+        { "property": "account", "style": "equals", "flag": "--account" },
+        { "property": "state_dir", "style": "equals", "flag": "--state-dir" }
+      ],
+      "output": { "mode": "json", "success_exit_codes": [0, 1] }
+    }
+  }
+}

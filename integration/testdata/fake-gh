@@ -1,0 +1,3 @@
+#!/bin/sh
+# Fake gh credential helper: prints a token and exits successfully.
+echo fake-test-token
