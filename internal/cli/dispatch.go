@@ -119,7 +119,7 @@ func parseInvocation(argv []string) (Invocation, error) {
 
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	strings_ := map[string]*string{}
+	stringVals := map[string]*string{}
 	var events *EventFlags
 	all := append(append([]flagSpec{}, commonFlags...), spec.flags...)
 	for _, f := range all {
@@ -133,7 +133,7 @@ func parseInvocation(argv []string) (Invocation, error) {
 		default:
 			s := ""
 			fs.StringVar(&s, f.name, "", "")
-			strings_[f.name] = &s
+			stringVals[f.name] = &s
 		}
 	}
 	if err := fs.Parse(rest); err != nil {
@@ -158,7 +158,7 @@ func parseInvocation(argv []string) (Invocation, error) {
 		}
 	}
 
-	for name, p := range strings_ {
+	for name, p := range stringVals {
 		inv.Flags[name] = *p
 	}
 	if events != nil {
