@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,4 +79,48 @@ func mustAck(t *testing.T, st *Store, account, consumer string, ids ...string) A
 		t.Fatalf("ack: %v", err)
 	}
 	return res
+}
+
+// TestDSNPathEscaping verifies that a state directory whose name contains the
+// characters that corrupt the SQLite DSN ('?', '#', and a space) opens and
+// round-trips a publication, and that the DSN keeps its three pinned pragmas.
+func TestDSNPathEscaping(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "st?te #dir")
+	full := filepath.Join(dir, dbFilename)
+
+	// The DSN must escape the path so the driver's first-'?' split and the
+	// SQLite URI decode target the real file, and must keep all three pragmas.
+	d := dsn(full, 0)
+	if got := strings.Count(d, "_pragma="); got != 3 {
+		t.Fatalf("dsn %q has %d pragmas, want 3", d, got)
+	}
+	// The path portion (before the query separator) must not contain a raw
+	// '?' or '#', which would be misread as the query/fragment start.
+	pathPart := d
+	if i := strings.Index(d, "?"); i >= 0 {
+		pathPart = d[:i]
+	}
+	if strings.ContainsAny(pathPart, "?#") {
+		t.Fatalf("dsn path %q contains an unescaped '?' or '#'", pathPart)
+	}
+
+	st, err := Open(dir, Options{Clock: clock.NewFake(baseTime)})
+	if err != nil {
+		t.Fatalf("open store in %q: %v", dir, err)
+	}
+	defer st.Close()
+
+	// The database must land at the exact expected path. An unescaped '?' or
+	// '#' in the path makes the driver/SQLite truncate the path at the first
+	// '?' and open a different file, so this is the assertion that catches it.
+	if _, statErr := os.Stat(full); statErr != nil {
+		t.Fatalf("db file not at expected path %q: %v", full, statErr)
+	}
+
+	publish(t, st, "alice", mkSnapshot("headA",
+		[]forge.Thread{thread("t1", "fix this")}, nil, nil))
+	evs := events(t, st, "alice", "c1")
+	if len(evs) != 2 {
+		t.Fatalf("events = %d (%v), want 2", len(evs), eventKinds(evs))
+	}
 }

@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,21 @@ func dsn(path string, busyTimeoutMS int) string {
 	if busyTimeoutMS <= 0 {
 		busyTimeoutMS = DefaultBusyTimeout
 	}
-	return fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(1)", path, busyTimeoutMS)
+	return fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(1)", escapeDSNPath(path), busyTimeoutMS)
+}
+
+// escapeDSNPath percent-encodes each path segment so a state directory whose
+// name contains '?' or '#' (or a space) does not corrupt the DSN. The driver
+// splits the DSN on the first '?' and hands the path to SQLite as a URI
+// (SQLITE_OPEN_URI), which percent-decodes it; a raw '?' or '#' in the path
+// would be misread as the query separator or fragment start. Segment '/'
+// separators are preserved.
+func escapeDSNPath(path string) string {
+	segments := strings.Split(path, "/")
+	for i, seg := range segments {
+		segments[i] = url.PathEscape(seg)
+	}
+	return strings.Join(segments, "/")
 }
 
 // openDatabase opens (creating if needed) the store's database file with the
