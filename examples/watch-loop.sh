@@ -4,6 +4,10 @@
 # Usage:
 #   watch-loop.sh <URL> --consumer <NAME> [--timeout 30m] [wait flags...]
 #
+# <URL> must be the first argument; valued flags after it pass through to
+# wait. Flags before the URL would have their values collide with positional
+# parsing, so that ordering is rejected.
+#
 # In monitor mode (docs/contract.md), `wait` delivers pending events and
 # acknowledges nothing; the harness records delivery by calling `ack` with the
 # delivered event IDs. Doing that by hand leaves a gap: acking without
@@ -19,6 +23,10 @@ URL=""
 CONSUMER=""
 FLAGS=()
 
+[ $# -ge 1 ] || { echo "watch-loop: missing <URL>" >&2; exit 2; }
+URL=$1; shift
+[ "${URL#-}" = "$URL" ] || { echo "watch-loop: <URL> must be the first argument" >&2; exit 2; }
+
 while [ $# -gt 0 ]; do
   case $1 in
     --consumer)
@@ -27,16 +35,11 @@ while [ $# -gt 0 ]; do
     -h|--help)
       sed -n '2,8p' "$0"; exit 0 ;;
     *)
-      if [ -z "$URL" ] && [ "${1#-}" = "$1" ]; then
-        URL=$1
-      else
-        FLAGS+=("$1")
-      fi
+      FLAGS+=("$1")
       shift ;;
   esac
 done
 
-[ -n "$URL" ] || { echo "watch-loop: missing <URL>" >&2; exit 2; }
 [ -n "$CONSUMER" ] || { echo "watch-loop: --consumer is required" >&2; exit 2; }
 
 while true; do
