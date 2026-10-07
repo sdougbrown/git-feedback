@@ -35,6 +35,10 @@ type Event struct {
 	// HeadBefore and HeadAfter are set only on head events.
 	HeadBefore string
 	HeadAfter  string
+	// Author is the object's authoring login (the stream's own account is
+	// filtered from delivery by default). Empty for synthetic target events
+	// and legacy rows, which are always deliverable.
+	Author string
 }
 
 // eventInsert carries the fields of one event row to insert.
@@ -48,6 +52,7 @@ type eventInsert struct {
 	observedAt time.Time
 	headBefore string // empty means NULL
 	headAfter  string // empty means NULL
+	author     string
 }
 
 func insertEvent(ctx context.Context, tx *sql.Tx, streamID int64, e eventInsert) error {
@@ -59,10 +64,10 @@ func insertEvent(ctx context.Context, tx *sql.Tx, streamID int64, e eventInsert)
 		after = e.headAfter
 	}
 	_, err := tx.ExecContext(ctx,
-		`INSERT INTO events (stream_id, kind, object_kind, object_id, revision, url, snapshot_id, observed_at, head_before, head_after)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO events (stream_id, kind, object_kind, object_id, revision, url, snapshot_id, observed_at, head_before, head_after, author)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		streamID, e.kind, e.objectKind, e.objectID, e.revision, e.url, e.snapshotID,
-		e.observedAt.UTC().Format(time.RFC3339Nano), before, after)
+		e.observedAt.UTC().Format(time.RFC3339Nano), before, after, e.author)
 	if err != nil {
 		return &Error{Code: CodeStore, Message: fmt.Sprintf("insert event: %v", err)}
 	}

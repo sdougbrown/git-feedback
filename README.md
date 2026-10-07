@@ -34,9 +34,9 @@ intercepts `git feedback --help` before it reaches the tool).
 ```
 git-feedback reconcile <URL> [--head <SHA>] [--account <LOGIN>] [--state-dir <DIR>] [--json]
 git-feedback snapshot <URL> --snapshot <ID> --output <FILE> [--account <LOGIN>] [--state-dir <DIR>] [--json]
-git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--json]
+git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--exclude-self] [--json]
 git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--account <LOGIN>] [--state-dir <DIR>] [--json]
-git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--json]
+git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--json]
 ```
 
 Every subcommand writes exactly one JSON envelope to stdout (see
@@ -94,6 +94,15 @@ cross-stream/cross-consumer cursor is a usage error (exit 2). A new consumer nam
 sees all history. With `--ids-only`, `events` contains plain event ID strings
 instead of full records — handy for building `ack --event` arguments without
 parsing the full envelope.
+
+`inbox` and `wait` filter out events whose object author is the stream's own
+account by default, so the account's own comments, reviews, and replies do not
+compound the delivery. `--exclude-self` opts back in and delivers everything.
+Author-less and legacy events (no author) are always delivered, and the store and
+snapshot retention are unchanged — the filter applies only at delivery. A thread
+revision whose only change is the account's own resolution state carries the
+thread author (a reviewer), so it is not filtered; self-authored content is what
+filters.
 
 ## Explicit acknowledgement
 

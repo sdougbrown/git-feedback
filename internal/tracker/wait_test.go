@@ -237,6 +237,73 @@ func TestWaitTimeoutAtDeadlineAcrossDeferredCycles(t *testing.T) {
 	}
 }
 
+// TestWaitExcludeSelf filters out events whose author equals the stream's
+// own account by default; ExcludeSelf restores them. The backlog is
+// delivered without running a cycle, so no bootstrap lease is needed.
+func TestWaitExcludeSelf(t *testing.T) {
+	e := newEnvAt(t, baseTime)
+
+	// Publish a backlog where alice (the stream's account) authors one
+	// comment and rev authors another.
+	target, err := github.ParseTarget(testURL)
+	if err != nil {
+		t.Fatalf("parse target: %v", err)
+	}
+	if _, err := e.st.Publish(context.Background(), store.PublishInput{
+		Target:  target,
+		Account: "alice",
+		Snapshot: &forge.Snapshot{
+			Head:           "h1",
+			CollectedStart: baseTime,
+			CollectedEnd:   baseTime,
+			Comments: []forge.Comment{
+				{ID: "C1", Author: "alice", Body: "alice comment", CreatedAt: baseTime},
+				{ID: "C2", Author: "rev", Body: "rev comment", CreatedAt: baseTime},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	t.Run("default excludes own-authored", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		res, err := runWait(t, e, WaitInput{URL: testURL, Consumer: "watcher"}, ctx, 5*time.Second)
+		if err != nil {
+			t.Fatalf("wait: %v", err)
+		}
+		if res.Status != StatusEvents {
+			t.Fatalf("wait status = %s, want events", res.Status)
+		}
+		// Only rev's comment is delivered; alice's is filtered. The target
+		// event (author '') is also delivered.
+		if len(res.Events) != 2 {
+			t.Fatalf("events = %d, want 2 (target + rev comment)", len(res.Events))
+		}
+		for _, ev := range res.Events {
+			if ev.Author == "alice" {
+				t.Errorf("event %s has author alice, want filtered", ev.ID)
+			}
+		}
+	})
+
+	t.Run("ExcludeSelf delivers everything", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		res, err := runWait(t, e, WaitInput{URL: testURL, Consumer: "watcher", ExcludeSelf: true}, ctx, 5*time.Second)
+		if err != nil {
+			t.Fatalf("wait: %v", err)
+		}
+		if res.Status != StatusEvents {
+			t.Fatalf("wait status = %s, want events", res.Status)
+		}
+		// Target + alice comment + rev comment = 3.
+		if len(res.Events) != 3 {
+			t.Fatalf("events = %d, want 3 (target + alice + rev)", len(res.Events))
+		}
+	})
+}
+
 // TestWaitDeliversEventsAppendedByOwnCycle: a cycle whose collection
 // publishes a snapshot exits with the appended events instead of sleeping
 // on the cadence.

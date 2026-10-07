@@ -31,6 +31,10 @@ type InboxInput struct {
 	// whose high-water mark is the stream's current maximum event seq.
 	Cursor string
 	Limit  int
+	// ExcludeAuthor, when non-empty, filters out events whose author equals
+	// this canonical login. Author-less (legacy) events are always delivered.
+	// Empty means no filtering.
+	ExcludeAuthor string
 }
 
 // InboxResult is one bounded page of pending events.
@@ -138,13 +142,23 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 		highWater, after = c.HighWater, c.After
 	}
 
+	where := `WHERE e.stream_id = ? AND e.id > ? AND e.id <= ? AND a.event_id IS NULL`
+	args := []any{in.Consumer, streamID, after, highWater}
+	excludeAuthor := forge.CanonicalAccount(in.ExcludeAuthor)
+	if excludeAuthor != "" {
+		// Author-less (legacy) events are always delivered; only events whose
+		// author matches the excluded canonical login are filtered out.
+		where += ` AND (e.author = '' OR e.author != ?)`
+		args = append(args, excludeAuthor)
+	}
+	args = append(args, limit+1)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT e.id, e.kind, e.object_kind, e.object_id, e.revision, e.url, e.snapshot_id, e.observed_at, e.head_before, e.head_after
+		SELECT e.id, e.kind, e.object_kind, e.object_id, e.revision, e.url, e.snapshot_id, e.observed_at, e.head_before, e.head_after, e.author
 		FROM events e
 		LEFT JOIN acks a ON a.event_id = e.id AND a.consumer = ? AND a.stream_id = e.stream_id
-		WHERE e.stream_id = ? AND e.id > ? AND e.id <= ? AND a.event_id IS NULL
+		`+where+`
 		ORDER BY e.id ASC
-		LIMIT ?`, in.Consumer, streamID, after, highWater, limit+1)
+		LIMIT ?`, args...)
 	if err != nil {
 		return InboxResult{}, &Error{Code: CodeStore, Message: fmt.Sprintf("read inbox: %v", err)}
 	}
@@ -157,7 +171,7 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 		var snapSeq int64
 		var headBefore, headAfter sql.NullString
 		if err := rows.Scan(&ev.Seq, &ev.Kind, &ev.ObjectKind, &ev.ObjectID, &ev.Revision,
-			&ev.URL, &snapSeq, &observedAt, &headBefore, &headAfter); err != nil {
+			&ev.URL, &snapSeq, &observedAt, &headBefore, &headAfter, &ev.Author); err != nil {
 			return InboxResult{}, &Error{Code: CodeStore, Message: fmt.Sprintf("read inbox: %v", err)}
 		}
 		ev.ID = formatEventID(ev.Seq)
