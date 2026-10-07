@@ -206,6 +206,9 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 	result, herr := inv.handler(ctx, inv)
 	if herr != nil {
 		result = errorResult(inv.Command, herr)
+		// The envelope is the machine-readable record; this line keeps the
+		// stderr diagnostic promise for handler failures.
+		fmt.Fprintln(stderr, herr.Error())
 	}
 
 	// A terminating signal exits with its shell code and no stdout output.
