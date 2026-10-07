@@ -62,6 +62,9 @@ func (e *Engine) admit(ctx context.Context, target forge.Target, account, token 
 	}
 	adm := &leaseAdmission{engine: e, token: token, ttl: ttl}
 	svcs := e.services(host, "")
+	if _, ok := svcs.Gate.(*store.Gate); !ok {
+		svcs.Gate = e.Store.NewGate(host, "")
+	}
 	authAdapter := newGithubAdapter(e, adm, svcs)
 	sess, err := authAdapter.Authenticate(ctx, account)
 	if err != nil {

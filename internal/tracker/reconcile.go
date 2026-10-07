@@ -52,6 +52,11 @@ type Engine struct {
 	// implementations; exposed for tests that substitute in-memory ones.
 	NewServices func(host, account string) Services
 
+	// NewAdapter, when set, builds the collection adapter for the given
+	// scope-bound services. Nil uses the real github adapter; exposed for
+	// tests that substitute a fake.
+	NewAdapter func(svcs Services) forge.Adapter
+
 	// OpenStore, when set, opens per-cycle stores whose SQLite lock waits
 	// are bounded by the remaining deadline. Nil reuses Store.
 	OpenStore OpenStore
@@ -166,9 +171,23 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 	}
 
 	// Collection services bound to the verified account's scope.
-	gate := e.Store.NewGate(host, account)
 	svcs := e.services(host, account)
-	adapter := github.NewAdapter(e.APIBase, e.Runner, nil, svcs.Gate, svcs.Pacer, svcs.Cache, e.Clock)
+	// Single source of truth: the lease acquisition and collection must
+	// consult the same gate. When the injected services carry a store-backed
+	// gate, use it for both; otherwise fall back to a store gate for both.
+	var leaseGate *store.Gate
+	if sg, ok := svcs.Gate.(*store.Gate); ok {
+		leaseGate = sg
+	} else {
+		leaseGate = e.Store.NewGate(host, account)
+		svcs.Gate = leaseGate
+	}
+	var adapter forge.Adapter
+	if e.NewAdapter != nil {
+		adapter = e.NewAdapter(svcs)
+	} else {
+		adapter = github.NewAdapter(e.APIBase, e.Runner, nil, svcs.Gate, svcs.Pacer, svcs.Cache, e.Clock)
+	}
 
 	// One write transaction: recheck next_due, consult the gates, and take
 	// the account lease (excluding live bootstrap admission).
@@ -176,7 +195,7 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
-	acq, err := e.Store.AcquireCollectionLease(ctx, host, account, token, ttl, streamID, gate)
+	acq, err := e.Store.AcquireCollectionLease(ctx, host, account, token, ttl, streamID, leaseGate)
 	if err != nil {
 		return Result{}, err
 	}

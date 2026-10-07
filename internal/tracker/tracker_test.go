@@ -583,3 +583,33 @@ func TestNilErrorIncompleteReleasesLease(t *testing.T) {
 	}
 	if res.Status != StatusDeferred {
 		t.Fatalf("second status = %s, want deferred", res.Status)
+	}
+}
+
+// TestInjectedGateNoSplitBrain: when collection services are injected, the
+// lease acquisition and collection must consult the same gate. An injected
+// in-memory gate's backoff is not persisted to the store, so a split-brain
+// (lease check on the store gate, collection on the in-memory gate) would
+// rate-limit the collection while the lease check admits it. With a single
+// source of truth, both use the store gate and the cycle is not deferred.
+// The backoff is set on REST only so the GraphQL viewer verification in the
+// admit path is not blocked.
+func TestInjectedGateNoSplitBrain(t *testing.T) {
+	e := newEnv(t)
+	memGate := github.NewMemoryGate()
+	memGate.Backoff(github.ResourceREST, e.clk.Now().Add(time.Hour))
+	e.eng.NewServices = func(host, account string) Services {
+		return Services{
+			Gate:  memGate,
+			Pacer: e.st.NewPacer(host, account),
+			Cache: e.st.NewHTTPCache(host, account),
+		}
+	}
+	res, err := e.eng.Reconcile(context.Background(), ReconcileInput{URL: testURL})
+	if err != nil {
+		t.Fatalf("reconcile: %v (split-brain: collection gated while lease admitted)", err)
+	}
+	if res.Status != StatusUpdated && res.Status != StatusUnchanged {
+		t.Fatalf("status = %s, want updated/unchanged", res.Status)
+	}
+}
