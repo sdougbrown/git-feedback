@@ -31,7 +31,7 @@ func (a *Adapter) restGet(ctx context.Context, tp *Transport, url string) (restP
 	}
 	newEntry := CacheEntry{ETag: header.Get("ETag"), Body: body, Link: header.Get("Link"), HasLink: header.Get("Link") != ""}
 	if status == http.StatusNotModified {
-		if !cached || len(entry.Body) == 0 || (entry.HasLink && entry.Link == "") {
+		if !cached || len(entry.Body) == 0 {
 			// The cached representation is incomplete: refetch unconditionally.
 			status, header, body, info, hasInfo, err = a.doRESTGet(ctx, tp, url, CacheEntry{}, false)
 			if err != nil {
