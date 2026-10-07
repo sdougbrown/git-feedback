@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"strings"
 	"sync"
@@ -157,7 +158,14 @@ func (a *Adapter) Authenticate(ctx context.Context, account string) (forge.Sessi
 		if errors.As(err, &rl) {
 			return nil, err
 		}
-		return nil, fmt.Errorf("%w: %v", forge.ErrAuth, err)
+		// Credential rejections (401/403) are terminal auth failures;
+		// other statuses and transport failures are transient and
+		// retry on cadence.
+		var se *StatusError
+		if errors.As(err, &se) && (se.StatusCode == http.StatusUnauthorized || se.StatusCode == http.StatusForbidden) {
+			return nil, fmt.Errorf("%w: %v", forge.ErrAuth, err)
+		}
+		return nil, fmt.Errorf("%w: %v", forge.ErrIncomplete, err)
 	}
 	if len(gqlErrs) > 0 {
 		return nil, fmt.Errorf("%w: verification failed: %s", forge.ErrAuth, strings.Join(gqlErrs, "; "))

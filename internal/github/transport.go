@@ -15,6 +15,16 @@ import (
 	"github.com/sdougbrown/git-feedback/internal/forge"
 )
 
+// StatusError reports a non-2xx HTTP status returned by the API.
+type StatusError struct {
+	StatusCode int
+}
+
+// Error implements error.
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("API returned HTTP %d", e.StatusCode)
+}
+
 // Read-only transport resources.
 const (
 	ResourceREST      = "rest"
@@ -113,7 +123,7 @@ func (t *Transport) GraphQL(ctx context.Context, query string, variables map[str
 		return nil, nil, forge.RateInfo{}, false, err
 	}
 	if status != http.StatusOK {
-		return nil, nil, forge.RateInfo{}, false, fmt.Errorf("graphql returned HTTP %d", status)
+		return nil, nil, forge.RateInfo{}, false, &StatusError{StatusCode: status}
 	}
 	var parsed struct {
 		Data   json.RawMessage `json:"data"`

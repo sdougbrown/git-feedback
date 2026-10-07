@@ -103,6 +103,45 @@ func TestGhAuthBounded(t *testing.T) {
 	}
 }
 
+func TestAuthenticateTransientStatus(t *testing.T) {
+	// A transient 5xx during viewer verification must not be classified as
+	// an auth failure: wait must retry on cadence, not die.
+	env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	})
+	_, err := env.adapter.Authenticate(context.Background(), "alice")
+	if errors.Is(err, forge.ErrAuth) {
+		t.Fatalf("502 during verification must not be ErrAuth, got %v", err)
+	}
+	if !errors.Is(err, forge.ErrIncomplete) {
+		t.Fatalf("502 during verification should be ErrIncomplete, got %v", err)
+	}
+}
+
+func TestAuthenticateCredentialRejection(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+		})
+		_, err := env.adapter.Authenticate(context.Background(), "alice")
+		if !errors.Is(err, forge.ErrAuth) {
+			t.Fatalf("%d during verification should be ErrAuth, got %v", status, err)
+		}
+	}
+}
+
+func TestAuthenticateNetworkFailure(t *testing.T) {
+	env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {})
+	env.server.Close()
+	_, err := env.adapter.Authenticate(context.Background(), "alice")
+	if errors.Is(err, forge.ErrAuth) {
+		t.Fatalf("network failure must not be ErrAuth, got %v", err)
+	}
+	if !errors.Is(err, forge.ErrIncomplete) {
+		t.Fatalf("network failure should be ErrIncomplete, got %v", err)
+	}
+}
+
 func TestAccountMismatch(t *testing.T) {
 	env := newTestEnv(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
