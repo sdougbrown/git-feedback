@@ -189,12 +189,12 @@ func (s *ghStub) exhaustGraphQL(remaining int, reset time.Time) {
 // exhausting the persisted GraphQL budget.
 func (s *ghStub) verifyResponse() string {
 	s.mu.Lock()
-	remaining, reset, exhausted := 5000, "2026-02-01T00:00:00Z", s.rateRemaining != 0
-	s.mu.Unlock()
-	if exhausted {
+	remaining, reset := 5000, "2026-02-01T00:00:00Z"
+	if s.rateRemaining != 0 {
 		remaining = s.rateRemaining
 		reset = s.rateReset.UTC().Format(time.RFC3339)
 	}
+	s.mu.Unlock()
 	return fmt.Sprintf(`{"data":{"viewer":{"login":%q},"rateLimit":{"remaining":%d,"limit":5000,"resetAt":%q}},"errors":null}`,
 		s.login, remaining, reset)
 }
