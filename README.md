@@ -123,7 +123,9 @@ appear in stdout, stderr, the database, or snapshot exports.
 
 `examples/cli-registry/git-feedback.json` registers the one-shot `reconcile`,
 `snapshot`, `inbox`, and `ack` tools (not `wait`). See `docs/contract.md` for the
-controller and monitor modes and the rationale for excluding `wait`.
+controller and monitor modes, the monitor loop idiom, and the rationale for
+excluding `wait`. `examples/watch-loop.sh` is a ready-made wrapper that runs
+`wait`, acknowledges the delivered event IDs, and respawns until interrupted.
 
 The manifest declares an explicit `env` of `{"HOME": "env:HOME", "PATH":
 "env:PATH"}`. On a machine where `gh` reads a non-default config location or a
