@@ -23,7 +23,9 @@ type Invocation struct {
 	Command string
 	URL     string
 	// Flags holds single-valued flag values by name; absent flags are "".
-	Flags  map[string]string
+	Flags map[string]string
+	// Bools holds boolean flags by name; absent flags are false.
+	Bools  map[string]bool
 	Events []string // repeated --event values
 
 	handler handlerFunc
@@ -80,7 +82,7 @@ var specs = map[string]commandSpec{
 		handle: handleSnapshot,
 	},
 	"inbox": {
-		flags:  []flagSpec{{"consumer", flagString}, {"limit", flagString}, {"after", flagString}},
+		flags:  []flagSpec{{"consumer", flagString}, {"limit", flagString}, {"after", flagString}, {"ids-only", flagBool}},
 		handle: handleInbox,
 	},
 	"ack": {
@@ -109,7 +111,7 @@ func parseInvocation(argv []string) (Invocation, error) {
 		return Invocation{}, &usageError{fmt.Sprintf("unknown subcommand %q", cmd)}
 	}
 
-	inv := Invocation{Command: cmd, Flags: map[string]string{}, handler: spec.handle}
+	inv := Invocation{Command: cmd, Flags: map[string]string{}, Bools: map[string]bool{}, handler: spec.handle}
 
 	urlFirst := len(rest) > 0 && !strings.HasPrefix(rest[0], "-")
 	if urlFirst {
@@ -120,12 +122,13 @@ func parseInvocation(argv []string) (Invocation, error) {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	stringVals := map[string]*string{}
+	boolVals := map[string]*bool{}
 	var events *EventFlags
 	all := append(append([]flagSpec{}, commonFlags...), spec.flags...)
 	for _, f := range all {
 		switch f.kind {
 		case flagBool:
-			fs.Bool(f.name, false, "")
+			boolVals[f.name] = fs.Bool(f.name, false, "")
 		case flagRepeat:
 			ev := &EventFlags{}
 			fs.Var(ev, f.name, "")
@@ -160,6 +163,9 @@ func parseInvocation(argv []string) (Invocation, error) {
 
 	for name, p := range stringVals {
 		inv.Flags[name] = *p
+	}
+	for name, p := range boolVals {
+		inv.Bools[name] = *p
 	}
 	if events != nil {
 		inv.Events = []string(*events)

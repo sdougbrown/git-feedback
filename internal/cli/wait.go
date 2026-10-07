@@ -74,7 +74,7 @@ func waitResult(command string, res tracker.WaitResult) Result {
 	if res.Attempt != nil {
 		r.Attempt = attemptEnvelope(*res.Attempt)
 	}
-	events := []map[string]any{}
+	events := []any{}
 	for _, ev := range res.Events {
 		events = append(events, eventMap(ev))
 	}

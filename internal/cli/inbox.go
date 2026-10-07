@@ -42,11 +42,20 @@ func handleInbox(ctx context.Context, inv Invocation) (Result, error) {
 	if err != nil {
 		return Result{}, mapStoreError(err)
 	}
-	events := make([]map[string]any, 0, len(page.Events))
-	for _, ev := range page.Events {
-		events = append(events, eventMap(ev))
+	if inv.Bools["ids-only"] {
+		// Machine consumers frequently need only the IDs to build --event args.
+		ids := make([]any, 0, len(page.Events))
+		for _, ev := range page.Events {
+			ids = append(ids, ev.ID)
+		}
+		r.Events = ids
+	} else {
+		events := make([]any, 0, len(page.Events))
+		for _, ev := range page.Events {
+			events = append(events, eventMap(ev))
+		}
+		r.Events = events
 	}
-	r.Events = events
 	r.HasMore = page.HasMore
 	if page.NextCursor != "" {
 		r.NextCursor = &page.NextCursor

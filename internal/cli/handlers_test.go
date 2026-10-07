@@ -362,6 +362,47 @@ func TestInboxPagination(t *testing.T) {
 	}
 }
 
+func TestInboxIDsOnly(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+
+	argv := []string{"inbox", "--consumer", "ci", "--ids-only", "--state-dir", dir, handlerURL}
+	code, env, _ := runCLI(t, argv)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	raw, ok := env["events"].([]any)
+	if !ok || len(raw) != 4 {
+		t.Fatalf("events = %v, want four ID strings", env["events"])
+	}
+	want := []string{"e1", "e2", "e3", "e4"}
+	for i, e := range raw {
+		id, isStr := e.(string)
+		if !isStr || id != want[i] {
+			t.Errorf("events[%d] = %v, want %q", i, e, want[i])
+		}
+	}
+	if env["has_more"] != false || env["next_cursor"] != nil {
+		t.Errorf("has_more/next_cursor = %v/%v, want false/null", env["has_more"], env["next_cursor"])
+	}
+
+	// --ids-only acknowledges nothing, like the default rendering.
+	code, env2, _ := runCLI(t, argv)
+	if code != 0 || len(env2["events"].([]any)) != 4 {
+		t.Fatalf("second read = exit %d, events %v; reading must not acknowledge", code, env2["events"])
+	}
+	page, err := st.Inbox(context.Background(), store.InboxInput{
+		TargetID: handlerTarget().ID, Account: "alice", Consumer: "ci", Limit: store.MaxInboxLimit,
+	})
+	if err != nil {
+		t.Fatalf("direct inbox: %v", err)
+	}
+	if len(page.Events) != 4 {
+		t.Errorf("stored pending events = %d, want 4", len(page.Events))
+	}
+}
+
 func TestAckRejectsUnknownID(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")
