@@ -68,6 +68,10 @@ type Engine struct {
 	// AdoptGateQuota, when set, overrides the store's AdoptGateQuota. Nil
 	// uses the store's implementation. Exposed for tests that inject a store failure.
 	AdoptGateQuota func(ctx context.Context, host, account string) error
+
+	// StreamID, when set, overrides the store's StreamID. Nil uses the
+	// store's implementation. Exposed for tests that inject a store failure.
+	StreamID func(ctx context.Context, targetID, account string) (int64, bool, error)
 }
 
 // Services bundles the scope-bound collection services.
@@ -206,7 +210,7 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 
 	// One write transaction: recheck next_due, consult the gates, and take
 	// the account lease (excluding live bootstrap admission).
-	streamID, _, err := e.Store.StreamID(ctx, target.ID, account)
+	streamID, _, err := e.streamID(ctx, target.ID, account)
 	if err != nil {
 		return Result{}, err
 	}
@@ -315,8 +319,9 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 func (e *Engine) publish(ctx context.Context, target forge.Target, host, account, token string, min time.Duration, coll forge.CollectResult, sess forge.Session) (Result, error) {
 	now := e.Clock.Now()
 	nextDue := now.Add(min)
-	streamID, _, err := e.Store.StreamID(ctx, target.ID, account)
+	streamID, _, err := e.streamID(ctx, target.ID, account)
 	if err != nil {
+		_ = e.Store.ReleaseLease(ctx, host, account, token)
 		return Result{}, err
 	}
 	res, err := e.Store.Publish(ctx, store.PublishInput{
@@ -378,6 +383,14 @@ func (e *Engine) publish(ctx context.Context, target forge.Target, host, account
 		Freshness:       e.freshness(ctx, target.ID, account),
 		Session:         sess,
 	}, nil
+}
+
+// streamID resolves the stream ID, using the injected seam when set.
+func (e *Engine) streamID(ctx context.Context, targetID, account string) (int64, bool, error) {
+	if e.StreamID != nil {
+		return e.StreamID(ctx, targetID, account)
+	}
+	return e.Store.StreamID(ctx, targetID, account)
 }
 
 // currentSnapshot returns the stream's current snapshot summary, or nil.

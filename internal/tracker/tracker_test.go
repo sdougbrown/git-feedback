@@ -236,6 +236,64 @@ func TestAdmitAdoptGateQuotaFailureReleasesBootstrap(t *testing.T) {
 	}
 }
 
+// completeAdapter is a forge.Adapter whose Collect returns a complete
+// result, so the engine reaches publish.
+type completeAdapter struct{}
+
+func (a *completeAdapter) Host() string { return testHost }
+func (a *completeAdapter) ParseTarget(raw string) (forge.Target, error) {
+	return forge.Target{}, errors.New("not used")
+}
+func (a *completeAdapter) Authenticate(ctx context.Context, account string) (forge.Session, error) {
+	return nil, errors.New("not used")
+}
+func (a *completeAdapter) Collect(ctx context.Context, s forge.Session, t forge.Target, o forge.CollectOptions) (forge.CollectResult, error) {
+	return forge.CollectResult{
+		Snapshot:   &forge.Snapshot{Head: "h1"},
+		HeadBefore: "h1",
+		HeadAfter:  "h1",
+		Complete:   true,
+	}, nil
+}
+
+// TestPublishStreamIDFailureReleasesLease: a StreamID lookup failure in
+// publish releases the account lease, so a second Reconcile is not
+// lease_busy.
+func TestPublishStreamIDFailureReleasesLease(t *testing.T) {
+	e := newEnv(t)
+	// Establish the stream (and a baseline snapshot) with a real cycle.
+	res1 := e.reconcile(ReconcileInput{URL: testURL})
+	if res1.Status != StatusUpdated {
+		t.Fatalf("first status = %s, want updated", res1.Status)
+	}
+	e.clk.Advance(61 * time.Second) // pass the persisted next_due
+	// Use a fake adapter so collection succeeds and publish is reached.
+	e.eng.NewAdapter = func(svcs Services) forge.Adapter {
+		return &completeAdapter{}
+	}
+	// Inject a StreamID failure on the second call (in publish).
+	calls := 0
+	e.eng.StreamID = func(ctx context.Context, targetID, account string) (int64, bool, error) {
+		calls++
+		if calls == 2 {
+			return 0, false, errors.New("injected stream_id failure")
+		}
+		return e.st.StreamID(ctx, targetID, account)
+	}
+	sess := &fakeSession{login: "alice"}
+	_, err := e.eng.Reconcile(context.Background(), ReconcileInput{URL: testURL, Session: sess})
+	if err == nil {
+		t.Fatal("expected a StreamID error, got nil")
+	}
+	// The lease was released: a second cycle acquires and does not report
+	// lease_busy.
+	e.eng.StreamID = nil
+	res := e.reconcile(ReconcileInput{URL: testURL, Session: sess})
+	if res.Status == StatusBusy {
+		t.Fatalf("second status = %s, want not busy (lease leaked)", res.Status)
+	}
+}
+
 // TestConcurrentCollectors: two same-stream cycles race; exactly one
 // collects and the loser is busy during ownership.
 func TestConcurrentCollectors(t *testing.T) {
