@@ -16,8 +16,13 @@ import (
 // holdBootstrap keeps a live foreign bootstrap lease on the host, so every
 // wait cycle ends busy before any account is verified: no cycle ever
 // carries an account or a session, and the wake stays on the 1s backoff.
-// The returned func stops the holder.
+// The lease is acquired synchronously before the caller runs Wait, so the
+// wait can never win the race and verify/collect/publish first. The
+// returned func stops the refresher.
 func holdBootstrap(e *env) func() {
+	if err := e.st.AcquireBootstrapLease(context.Background(), testHost, "other", time.Hour, e.clk.Now()); err != nil {
+		e.t.Fatalf("acquire bootstrap lease: %v", err)
+	}
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
@@ -28,7 +33,7 @@ func holdBootstrap(e *env) func() {
 				return
 			default:
 			}
-			_ = e.st.AcquireBootstrapLease(context.Background(), testHost, "other", time.Hour, e.clk.Now())
+			_ = e.st.RefreshLease(context.Background(), testHost, "", "other", time.Hour, e.clk.Now())
 			time.Sleep(time.Millisecond)
 		}
 	}()
