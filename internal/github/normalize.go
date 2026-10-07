@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sdougbrown/git-feedback/internal/forge"
@@ -75,9 +76,13 @@ func (a *Adapter) collectThreads(ctx context.Context, tp *Transport, t forge.Tar
 	cursor := ""
 	seen := map[string]bool{}
 	for {
+		owner, name, found := strings.Cut(t.Repo, "/")
+		if !found {
+			name = t.Repo
+		}
 		vars := map[string]any{
-			"owner":  ownerOf(t),
-			"name":   nameOf(t),
+			"owner":  owner,
+			"name":   name,
 			"number": t.Number,
 		}
 		if cursor != "" {
@@ -91,7 +96,7 @@ func (a *Adapter) collectThreads(ctx context.Context, tp *Transport, t forge.Tar
 			st.rates = append(st.rates, info)
 		}
 		if len(gqlErrs) > 0 {
-			return nil, fmt.Errorf("%w: GraphQL errors: %s", forge.ErrIncomplete, joinErrs(gqlErrs))
+			return nil, fmt.Errorf("%w: GraphQL errors: %s", forge.ErrIncomplete, strings.Join(gqlErrs, "; "))
 		}
 		var payload gqlThreadsData
 		if err := json.Unmarshal(data, &payload); err != nil {
@@ -147,7 +152,7 @@ func (a *Adapter) fillThreadComments(ctx context.Context, tp *Transport, node gq
 			st.rates = append(st.rates, info)
 		}
 		if len(gqlErrs) > 0 {
-			return node, fmt.Errorf("%w: GraphQL errors: %s", forge.ErrIncomplete, joinErrs(gqlErrs))
+			return node, fmt.Errorf("%w: GraphQL errors: %s", forge.ErrIncomplete, strings.Join(gqlErrs, "; "))
 		}
 		var payload gqlThreadCommentsData
 		if err := json.Unmarshal(data, &payload); err != nil {
@@ -194,35 +199,6 @@ func (a *Adapter) collectComments(ctx context.Context, tp *Transport, t forge.Ta
 		comments = append(comments, cm)
 	}
 	return comments, nil
-}
-
-func joinErrs(msgs []string) string {
-	out := ""
-	for i, m := range msgs {
-		if i > 0 {
-			out += "; "
-		}
-		out += m
-	}
-	return out
-}
-
-func ownerOf(t forge.Target) string {
-	for i := 0; i < len(t.Repo); i++ {
-		if t.Repo[i] == '/' {
-			return t.Repo[:i]
-		}
-	}
-	return t.Repo
-}
-
-func nameOf(t forge.Target) string {
-	for i := 0; i < len(t.Repo); i++ {
-		if t.Repo[i] == '/' {
-			return t.Repo[i+1:]
-		}
-	}
-	return t.Repo
 }
 
 // normalizeThread converts a GraphQL thread node into a forge.Thread. The
