@@ -1,5 +1,7 @@
-// Package github implements the forge.Adapter for GitHub.com. Stage 1
-// provides target URL parsing only; auth and collection arrive in Stage 2.
+// Package github implements the forge.Adapter for GitHub.com: target URL
+// parsing, bounded gh-auth lookup, a read-only transport with rate
+// gating and pacing, and complete pull request collection (threads,
+// reviews, and issue comments) normalized into forge objects.
 package github
 
 import (

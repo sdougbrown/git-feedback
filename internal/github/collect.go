@@ -118,7 +118,7 @@ func (a *Adapter) collect(ctx context.Context, tp *Transport, t forge.Target, o 
 		inv.Objects = append(inv.Objects, Object{
 			Kind:        forge.KindThread,
 			ProviderID:  th.ID,
-			Fingerprint: fingerprintThread(ft),
+			Fingerprint: forge.FingerprintThread(*ft),
 			Thread:      ft,
 		})
 	}
@@ -131,7 +131,7 @@ func (a *Adapter) collect(ctx context.Context, tp *Transport, t forge.Target, o 
 		inv.Objects = append(inv.Objects, Object{
 			Kind:        forge.KindReview,
 			ProviderID:  fmt.Sprintf("%d", rv.ID),
-			Fingerprint: fingerprintReview(fr),
+			Fingerprint: forge.FingerprintReview(*fr),
 			Review:      fr,
 		})
 	}
@@ -144,28 +144,9 @@ func (a *Adapter) collect(ctx context.Context, tp *Transport, t forge.Target, o 
 		inv.Objects = append(inv.Objects, Object{
 			Kind:        forge.KindComment,
 			ProviderID:  fmt.Sprintf("%d", cm.ID),
-			Fingerprint: fingerprintComment(fc),
+			Fingerprint: forge.FingerprintComment(*fc),
 			Comment:     fc,
 		})
 	}
 	return inv, nil
-}
-
-func fingerprintThread(t *forge.Thread) string {
-	return forge.Fingerprint(forge.FingerprintInput{
-		ID: t.ID, Kind: forge.KindThread, Author: t.Author, Body: t.Body,
-		Path: t.Path, ResolutionState: t.ResolutionState, Comments: t.Comments,
-	})
-}
-
-func fingerprintReview(r *forge.Review) string {
-	return forge.Fingerprint(forge.FingerprintInput{
-		ID: r.ID, Kind: forge.KindReview, Author: r.Author, Body: r.Body, ReviewState: r.State,
-	})
-}
-
-func fingerprintComment(c *forge.Comment) string {
-	return forge.Fingerprint(forge.FingerprintInput{
-		ID: c.ID, Kind: forge.KindComment, Author: c.Author, Body: c.Body,
-	})
 }
