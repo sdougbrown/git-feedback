@@ -454,8 +454,6 @@ func TestDeferredReturnsCurrentSnapshot(t *testing.T) {
 	}
 }
 
-// TestEngineDefaultsKeepGatesDurable is a smoke check that the engine's
-// default services are the store-backed ones (gates survive a reopen).
 // storeOpenErr mimics the CLI's statusError wrap around a store open
 // failure, so the test exercises the same errors.As path as production.
 type storeOpenErr struct {
@@ -514,6 +512,8 @@ func TestWaitStoreOpenErrorPlumbing(t *testing.T) {
 	})
 }
 
+// TestEngineDefaultsKeepGatesDurable is a smoke check that the engine's
+// default services are the store-backed ones (gates survive a reopen).
 func TestEngineDefaultsKeepGatesDurable(t *testing.T) {
 	e := newEnv(t)
 	e.reconcile(ReconcileInput{URL: testURL})
