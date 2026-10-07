@@ -147,7 +147,7 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 		cycleCut := cycle.Err() != nil
 		deadlineCut := ctx.Err() != nil
 		cancel()
-		lastAttempt = attemptOf(res, eng, target, account, lastAttempt)
+		lastAttempt = attemptOf(ctx, res, eng, target, account, lastAttempt)
 
 		if rerr != nil {
 			switch {
@@ -195,7 +195,7 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 
 // attemptOf captures the latest attempt for the timeout result: the cycle's
 // own recorded attempt, or the store's latest attempt for the stream.
-func attemptOf(res Result, eng *Engine, target forge.Target, account string, prev *store.Attempt) *store.Attempt {
+func attemptOf(ctx context.Context, res Result, eng *Engine, target forge.Target, account string, prev *store.Attempt) *store.Attempt {
 	if res.Attempt != nil {
 		return res.Attempt
 	}
@@ -206,7 +206,7 @@ func attemptOf(res Result, eng *Engine, target forge.Target, account string, pre
 	if who == "" {
 		return prev
 	}
-	if att, ok, err := eng.Store.LatestAttempt(context.Background(), target.ID, who); err == nil && ok {
+	if att, ok, err := eng.Store.LatestAttempt(ctx, target.ID, who); err == nil && ok {
 		return &att
 	}
 	return prev
