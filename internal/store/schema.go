@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -66,21 +67,43 @@ func openDatabase(stateDir string, busyTimeoutMS int) (*sql.DB, string, error) {
 	return db, path, nil
 }
 
+// isLockError reports whether err is a transient SQLite lock or busy error,
+// such as a concurrent process holding the WAL checkpoint lock longer than
+// the busy timeout. These are retriable, not corruption.
+func isLockError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "database table is locked")
+}
+
 // corruptOrStore maps an open/ping failure on an existing non-empty file to
 // the explicit store_corrupt error; the tool never deletes or recreates it.
+// A transient lock/busy failure is retriable store_error instead.
 func corruptOrStore(path string, err error) error {
 	if st, statErr := os.Stat(path); statErr == nil && st.Size() > 0 {
-		return &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("open %s: %v", path, err)}
+		code := CodeStoreCorrupt
+		if isLockError(err) {
+			code = CodeStore
+		}
+		return &Error{Code: code, Message: fmt.Sprintf("open %s: %v", path, err)}
 	}
 	return &Error{Code: CodeStore, Message: fmt.Sprintf("open %s: %v", path, err)}
 }
 
 // checkIntegrity runs PRAGMA integrity_check and reports store_corrupt on any
-// failure other than a clean "ok".
+// failure other than a clean "ok". A transient lock/busy failure is retriable
+// store_error instead.
 func checkIntegrity(db *sql.DB) error {
 	rows, err := db.Query("PRAGMA integrity_check")
 	if err != nil {
-		return &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("integrity_check: %v", err)}
+		code := CodeStoreCorrupt
+		if isLockError(err) {
+			code = CodeStore
+		}
+		return &Error{Code: code, Message: fmt.Sprintf("integrity_check: %v", err)}
 	}
 	defer rows.Close()
 	var ok bool
@@ -96,7 +119,11 @@ func checkIntegrity(db *sql.DB) error {
 		return &Error{Code: CodeStoreCorrupt, Message: "integrity_check: " + res}
 	}
 	if err := rows.Err(); err != nil {
-		return &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("integrity_check: %v", err)}
+		code := CodeStoreCorrupt
+		if isLockError(err) {
+			code = CodeStore
+		}
+		return &Error{Code: code, Message: fmt.Sprintf("integrity_check: %v", err)}
 	}
 	if !ok {
 		return &Error{Code: CodeStoreCorrupt, Message: "integrity_check: no result"}

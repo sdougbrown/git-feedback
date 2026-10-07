@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,42 @@ func TestRefuseNewerSchema(t *testing.T) {
 	// The store must survive untouched.
 	if _, err := os.Stat(filepath.Join(dir, dbFilename)); err != nil {
 		t.Fatalf("store file missing after refusal: %v", err)
+	}
+}
+
+// TestOpenLockedStoreIsRetriable verifies that a transient lock failure on
+// an existing store (a concurrent process holding the WAL lock longer than
+// the busy timeout) is classified as retriable store_error, not
+// store_corrupt. A real lock failure surfaces as
+// "database is locked (5) (SQLITE_BUSY)".
+func TestOpenLockedStoreIsRetriable(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(dir, dbFilename)
+	if err := os.WriteFile(path, []byte("existing store data"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// The busy error string as modernc.org/sqlite surfaces it via database/sql.
+	locked := errors.New("database is locked (5) (SQLITE_BUSY)")
+	err := corruptOrStore(path, locked)
+	var se *Error
+	if !errors.As(err, &se) {
+		t.Fatalf("corruptOrStore: expected *Error, got %v", err)
+	}
+	if se.Code != CodeStore {
+		t.Fatalf("code = %s, want %s (message: %s)", se.Code, CodeStore, se.Message)
+	}
+
+	// A genuine open failure on the same file stays store_corrupt.
+	err = corruptOrStore(path, errors.New("file is not a database"))
+	if !errors.As(err, &se) {
+		t.Fatalf("corruptOrStore: expected *Error, got %v", err)
+	}
+	if se.Code != CodeStoreCorrupt {
+		t.Fatalf("code = %s, want %s (message: %s)", se.Code, CodeStoreCorrupt, se.Message)
 	}
 }
 
