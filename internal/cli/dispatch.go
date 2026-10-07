@@ -39,9 +39,11 @@ type statusError struct {
 	code      string
 	message   string
 	retryable bool
+	err       error
 }
 
 func (e *statusError) Error() string { return e.message }
+func (e *statusError) Unwrap() error { return e.err }
 
 type flagKind int
 

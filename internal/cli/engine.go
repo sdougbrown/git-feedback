@@ -40,7 +40,7 @@ func openHookedStore(inv Invocation, clk clock.Clock, busyTimeout time.Duration)
 	}
 	st, err := store.Open(dir, store.Options{Clock: clk, BusyTimeout: busyTimeout})
 	if err != nil {
-		return nil, &statusError{code: "store_error", message: err.Error()}
+		return nil, &statusError{code: "store_error", message: err.Error(), err: err}
 	}
 	ReadTestHooks().ApplyStoreCrash(st)
 	return st, nil
