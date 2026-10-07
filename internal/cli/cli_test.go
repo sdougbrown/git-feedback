@@ -94,7 +94,8 @@ func TestDispatchUsageErrorsExit2(t *testing.T) {
 		{"two positionals", []string{"reconcile", "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"}},
 		{"trailing positional after url-first", []string{"reconcile", "https://github.com/o/r/pull/1", "extra", "--json"}},
 		{"unknown flag", []string{"reconcile", "--bogus", "https://github.com/o/r/pull/1"}},
-		{"unknown flag url-first", []string{"inbox", "https://github.com/o/r/pull/1", "--consumer"}}, // missing value
+		{"missing flag value url-first", []string{"inbox", "https://github.com/o/r/pull/1", "--consumer"}},
+		{"unknown flag url-first", []string{"inbox", "https://github.com/o/r/pull/1", "--bogus"}},
 		{"invalid timeout", []string{"wait", "--timeout", "soon", "https://github.com/o/r/pull/1"}},
 	}
 	for _, tc := range tests {
