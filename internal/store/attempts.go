@@ -155,7 +155,10 @@ func (s *Store) LatestAttempt(ctx context.Context, targetID, account string) (At
 	}
 	defer rows.Close()
 	if !rows.Next() {
-		return Attempt{}, false, rows.Err()
+		if err := rows.Err(); err != nil {
+			return Attempt{}, false, &Error{Code: CodeStore, Message: fmt.Sprintf("read attempt: %v", err)}
+		}
+		return Attempt{}, false, nil
 	}
 	a, err := scanAttempt(rows)
 	if err != nil {
