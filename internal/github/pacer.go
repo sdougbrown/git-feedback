@@ -46,7 +46,7 @@ func (p *FixedPacer) Wait(ctx context.Context) error {
 	p.mu.Unlock()
 	if wait > 0 {
 		if deadline, ok := ctx.Deadline(); ok {
-			if remain := time.Until(deadline); remain < wait {
+			if remain := deadline.Sub(p.Clock.Now()); remain < wait {
 				p.Clock.Sleep(remain)
 				return ctx.Err()
 			}

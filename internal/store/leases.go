@@ -236,7 +236,7 @@ func (p *Pacer) Wait(ctx context.Context) error {
 	}
 	if d := next.Sub(p.clk.Now()); d > 0 {
 		if deadline, ok := ctx.Deadline(); ok {
-			if remain := time.Until(deadline); remain < d {
+			if remain := deadline.Sub(p.clk.Now()); remain < d {
 				p.clk.Sleep(remain)
 				return ctx.Err()
 			}
