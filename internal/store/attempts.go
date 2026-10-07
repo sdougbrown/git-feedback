@@ -60,7 +60,7 @@ func (s *Store) RecordAttempt(ctx context.Context, in AttemptInput) (Attempt, er
 	if err := tx.Commit(); err != nil {
 		return Attempt{}, &Error{Code: CodeStore, Message: fmt.Sprintf("commit attempt: %v", err)}
 	}
-	return attemptFromSeq(s.db, seq)
+	return attemptFromSeq(ctx, s.db, seq)
 }
 
 // RecordAttemptTx appends one attempt row inside the caller's transaction.
@@ -138,7 +138,7 @@ func (s *Store) FinalizeAttempt(ctx context.Context, in FinalizeInput) (Attempt,
 	if err := tx.Commit(); err != nil {
 		return Attempt{}, &Error{Code: CodeStore, Message: fmt.Sprintf("commit finalize: %v", err)}
 	}
-	return attemptFromSeq(s.db, seq)
+	return attemptFromSeq(ctx, s.db, seq)
 }
 
 // LatestAttempt returns the stream's most recent attempt row.
@@ -198,8 +198,8 @@ func scanAttempt(r rowScanner) (Attempt, error) {
 }
 
 // attemptFromSeq reads back one attempt row by sequence.
-func attemptFromSeq(q queryer, seq int64) (Attempt, error) {
-	row := q.QueryRowContext(context.Background(),
+func attemptFromSeq(ctx context.Context, q queryer, seq int64) (Attempt, error) {
+	row := q.QueryRowContext(ctx,
 		`SELECT id, stream_id, outcome, error_code, complete, observed_head, expected_head, at, next_due
 		 FROM attempts WHERE id = ?`, seq)
 	a, err := scanAttempt(row)
