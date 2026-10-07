@@ -711,6 +711,45 @@ func TestWaitFatalErrorFailsFast(t *testing.T) {
 	})
 }
 
+// TestWaitSignalCancellationReturnsErrorOutcome: a signal-like
+// cancellation (context.Canceled, as signal.NotifyContext produces on
+// SIGINT/SIGTERM) of a run whose cycles keep failing must end the wait
+// with the error outcome, never the timeout status the run never hit.
+func TestWaitSignalCancellationReturnsErrorOutcome(t *testing.T) {
+	e := newEnvAt(t, time.Now().Add(-time.Hour))
+	e.eng.NewAdapter = func(svcs Services) forge.Adapter {
+		return &errAdapter{err: forge.ErrIncomplete}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	type outcome struct {
+		res WaitResult
+		err error
+	}
+	ch := make(chan outcome, 1)
+	go func() {
+		res, err := e.eng.Wait(ctx, WaitInput{URL: testURL, Consumer: "c"})
+		ch <- outcome{res, err}
+	}()
+
+	// Let the first failing cycle start, then cancel like a signal.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case o := <-ch:
+		if o.err == nil {
+			t.Fatalf("wait: signal cancellation must return an error outcome, got status %s", o.res.Status)
+		}
+		if o.res.Status == StatusTimeout {
+			t.Fatal("wait: signal cancellation must not claim timeout")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("wait did not return after the signal cancellation")
+	}
+}
+
 // TestEngineDefaultsKeepGatesDurable is a smoke check that the engine's
 // default services are the store-backed ones (gates survive a reopen).
 func TestEngineDefaultsKeepGatesDurable(t *testing.T) {

@@ -149,7 +149,12 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 		// Capture the cycle's own cancellation before cancel() overwrites
 		// it: a cycle cut by its bound is transient, never a fatal error.
 		cycleCut := cycle.Err() != nil
-		deadlineCut := ctx.Err() != nil
+		// Distinguish the two ways the outer context dies: a deadline
+		// expiry is the timeout outcome; a cancellation (SIGINT/SIGTERM
+		// via signal.NotifyContext) is not — the run reports the cycle's
+		// actual error instead of claiming a timeout it never hit.
+		deadlineCut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+		signalCut := errors.Is(ctx.Err(), context.Canceled)
 		cancel()
 		lastAttempt = attemptOf(ctx, res, eng, target, account, lastAttempt)
 
@@ -158,6 +163,10 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 			case deadlineCut:
 				// The overall deadline cut the cycle short.
 				return e.timeoutResult(eng, target, account, in, lastAttempt), nil
+			case signalCut:
+				// A signal cancelled the run: report the cycle's actual
+				// error outcome, not a timeout the run never hit.
+				return WaitResult{}, rerr
 			case cycleCut:
 				// The remote hung past the cycle bound: no request succeeded
 				// and no cadence was persisted, so retry on the short
@@ -192,6 +201,11 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 		}
 
 		if serr := e.sleepUntil(ctx, clk, wakeTime(res, rerr, cycleCut, eng)); serr != nil {
+			// A signal cancelled the run: report the cancellation, not a
+			// timeout the run never hit.
+			if errors.Is(serr, context.Canceled) {
+				return WaitResult{}, serr
+			}
 			return e.timeoutResult(eng, target, account, in, lastAttempt), nil
 		}
 	}
