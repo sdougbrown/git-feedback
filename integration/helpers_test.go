@@ -52,15 +52,22 @@ func binPaths(t *testing.T) (prod, tagged string) {
 	return prod, tagged
 }
 
-// fakeGHPath returns the absolute path to the fake gh credential helper,
-// ensuring it is executable.
+// fakeGHPath returns the absolute path to a copy of the fake gh
+// credential helper in a temp dir, executable. Copying avoids chmodding
+// the committed testdata, which fails when the worktree files are not
+// owned by the running user.
 func fakeGHPath(t *testing.T) string {
 	t.Helper()
-	p := filepath.Join(repoRoot, "integration", "testdata", "fake-gh")
-	if err := os.Chmod(p, 0o755); err != nil {
-		t.Fatalf("chmod fake gh: %v", err)
+	src := filepath.Join(repoRoot, "integration", "testdata", "fake-gh")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read fake gh: %v", err)
 	}
-	return p
+	dst := filepath.Join(t.TempDir(), "fake-gh")
+	if err := os.WriteFile(dst, data, 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	return dst
 }
 
 // ghStub is the fake GitHub API server. It counts requests per endpoint,
