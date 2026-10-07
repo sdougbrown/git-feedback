@@ -1,6 +1,7 @@
 package github
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -14,7 +15,7 @@ const ReserveRemaining = 10
 // RateGate admits requests per resource and records quota observations.
 type RateGate interface {
 	// Check returns nil when a request on resource may proceed at now.
-	Check(resource string, now time.Time) error
+	Check(ctx context.Context, resource string, now time.Time) error
 	// Record stores one quota observation for a resource.
 	Record(info forge.RateInfo)
 }
@@ -45,7 +46,7 @@ func NewMemoryGate() *MemoryGate {
 }
 
 // Check implements RateGate.
-func (g *MemoryGate) Check(resource string, now time.Time) error {
+func (g *MemoryGate) Check(_ context.Context, resource string, now time.Time) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	st, ok := g.state[resource]

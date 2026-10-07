@@ -37,8 +37,8 @@ func (s *Store) NewGate(host, account string) *Gate {
 // Check implements github.RateGate. It mirrors github.MemoryGate semantics:
 // an until-window blocks until it passes, and a budget below the reserve
 // blocks until its reset.
-func (g *Gate) Check(resource string, now time.Time) error {
-	return g.check(context.Background(), g.db, resource, now)
+func (g *Gate) Check(ctx context.Context, resource string, now time.Time) error {
+	return g.check(ctx, g.db, resource, now)
 }
 
 // check evaluates the gate for one resource against q, which is either the

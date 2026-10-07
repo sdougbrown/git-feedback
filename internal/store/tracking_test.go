@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +27,30 @@ func trackingStore(t *testing.T) (*Store, *clock.Fake) {
 	}
 	t.Cleanup(func() { st.Close() })
 	return st, clk
+}
+
+// TestGateCheckHonorsContextCancellation: a cancelled context short-circuits
+// the gate query instead of blocking on the SQLite busy timeout.
+func TestGateCheckHonorsContextCancellation(t *testing.T) {
+	st, clk := trackingStore(t)
+	g := st.NewGate("github.com", "alice")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	err := g.Check(ctx, github.ResourceREST, clk.Now())
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Check with a cancelled context returned nil, want a cancellation error")
+	}
+	if !strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("Check with a cancelled context = %v, want context.Canceled", err)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("Check blocked for %v despite a cancelled context", elapsed)
+	}
 }
 
 // TestTrackingMigrationPreservesInbox builds a populated Stage 3 database by
@@ -126,10 +151,10 @@ func TestAccountIsolation(t *testing.T) {
 	// Gates: a low remaining budget for alice does not block bob.
 	gA, gB := st.NewGate(host, "alice"), st.NewGate(host, "bob")
 	gA.Record(forge.RateInfo{Resource: github.ResourceREST, Remaining: 5, Limit: 5000, Reset: clk.Now().Add(time.Hour)})
-	if err := gA.Check(github.ResourceREST, clk.Now()); err == nil {
+	if err := gA.Check(ctx, github.ResourceREST, clk.Now()); err == nil {
 		t.Fatal("alice gate should block on remaining below reserve")
 	}
-	if err := gB.Check(github.ResourceREST, clk.Now()); err != nil {
+	if err := gB.Check(ctx, github.ResourceREST, clk.Now()); err != nil {
 		t.Fatalf("bob gate should be open: %v", err)
 	}
 
@@ -157,7 +182,7 @@ func TestAccountIsolation(t *testing.T) {
 	// Secondary backoff is account-wide: alice's secondary row does not block
 	// bob's secondary check (host-wide secondary checking is bootstrap-only).
 	gA.Backoff(github.ResourceREST, clk.Now().Add(time.Hour))
-	if err := gB.Check(github.ResourceSecondary, clk.Now()); err != nil {
+	if err := gB.Check(ctx, github.ResourceSecondary, clk.Now()); err != nil {
 		t.Fatalf("bob secondary check must not be blocked by alice's backoff: %v", err)
 	}
 	if err := st.ReleaseLease(ctx, host, "alice", "tokA"); err != nil {
@@ -283,6 +308,7 @@ func TestExpiryWhileAwaitingWriteLock(t *testing.T) {
 // TestBackoffSurvivesRestart records a secondary backoff, closes and
 // reopens the store, and asserts the gate still blocks.
 func TestBackoffSurvivesRestart(t *testing.T) {
+	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "state")
 	clk := clock.NewFake(trackingBase)
 	st, err := Open(dir, Options{Clock: clk})
@@ -299,7 +325,7 @@ func TestBackoffSurvivesRestart(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer st2.Close()
-	err = st2.NewGate("github.com", "alice").Check(github.ResourceREST, clk.Now())
+	err = st2.NewGate("github.com", "alice").Check(ctx, github.ResourceREST, clk.Now())
 	var rl *forge.ErrRateLimited
 	if !errors.As(err, &rl) {
 		t.Fatalf("rest after restart = %v, want rate limited by persisted secondary backoff", err)

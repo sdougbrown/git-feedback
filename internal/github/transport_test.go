@@ -21,9 +21,9 @@ type spyGate struct {
 	backoffs []string
 }
 
-func (g *spyGate) Check(resource string, now time.Time) error {
+func (g *spyGate) Check(ctx context.Context, resource string, now time.Time) error {
 	g.checks = append(g.checks, resource)
-	return g.MemoryGate.Check(resource, now)
+	return g.MemoryGate.Check(ctx, resource, now)
 }
 
 func (g *spyGate) Backoff(resource string, until time.Time) {

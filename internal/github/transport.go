@@ -135,7 +135,7 @@ func (t *Transport) do(ctx context.Context, method, rawURL, contentType string, 
 	if method != http.MethodGet && method != http.MethodPost {
 		return 0, nil, nil, forge.RateInfo{}, false, fmt.Errorf("method %q is not permitted by the read-only transport", method)
 	}
-	if err := t.gate.Check(resource, t.clock.Now()); err != nil {
+	if err := t.gate.Check(ctx, resource, t.clock.Now()); err != nil {
 		return 0, nil, nil, forge.RateInfo{}, false, err
 	}
 	if err := t.pacer.Wait(ctx); err != nil {
