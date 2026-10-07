@@ -54,12 +54,11 @@ func (g *Gate) check(ctx context.Context, q queryer, resource string, now time.T
 		cands = append(cands, candidate{account: g.account, scope: github.ResourceSecondary})
 	}
 	if g.account == "" {
-		// Bootstrap honors known account gates for the resource.
-		cands = append(cands, candidate{account: "*", scope: resource})
-	}
-	if g.account == "" {
-		// Bootstrap checks host-wide secondary backoff.
-		cands = append(cands, candidate{account: "*", scope: github.ResourceSecondary})
+		// Bootstrap honors known account gates for the resource and
+		// checks host-wide secondary backoff.
+		cands = append(cands,
+			candidate{account: "*", scope: resource},
+			candidate{account: "*", scope: github.ResourceSecondary})
 	}
 
 	var until time.Time
