@@ -108,7 +108,7 @@ func (a *Adapter) recordGQLRateLimit(rl *gqlRateLimit) error {
 		return fmt.Errorf("%w: GraphQL response missing rateLimit", forge.ErrIncomplete)
 	}
 	a.gate.Record(rl.rateInfo())
-	if rl.Remaining > 0 && rl.Remaining < ReserveRemaining {
+	if rl.Remaining >= 0 && rl.Remaining < ReserveRemaining {
 		return &forge.ErrRateLimited{Resource: ResourceGraphQL, Until: rl.ResetAt}
 	}
 	return nil

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -463,5 +464,41 @@ func TestConditionalLastPageCached(t *testing.T) {
 	}
 	if stub.restServed != servedAfterFirst {
 		t.Fatalf("final page was refetched instead of served from 304 cache: served %d → %d", servedAfterFirst, stub.restServed)
+	}
+}
+
+// gqlThreadsBody is a single-node threads page whose rateLimit reports the
+// given remaining budget. hasNextPage is false so no further GraphQL request
+// is issued; the reserve check is the only thing that can abort the attempt.
+func gqlThreadsBody(remaining int) string {
+	return `{"data": {"repository": {"pullRequest": {"reviewThreads": {"totalCount": 1, "pageInfo": {"hasNextPage": false, "endCursor": null}, "nodes": [{"id": "T1", "isOutdated": false, "isResolved": false, "path": "a.go", "comments": {"totalCount": 1, "pageInfo": {"hasNextPage": false, "endCursor": null}, "nodes": [{"id": "C1", "body": "root", "createdAt": "2024-01-01T00:00:00Z", "author": {"login": "alice"}}]}}]}}}, "rateLimit": {"remaining": ` + strconv.Itoa(remaining) + `, "limit": 5000, "resetAt": "2030-01-01T00:00:00Z"}}, "errors": null}`
+}
+
+func TestGQLRateLimitAborts(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		remaining int
+		wantRate  bool
+	}{
+		{name: "exhausted", remaining: 0, wantRate: true},
+		{name: "below-reserve", remaining: 5, wantRate: true},
+		{name: "ample", remaining: 500, wantRate: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := baseStub(t)
+			stub.graphql["threads"] = []string{gqlThreadsBody(tc.remaining)}
+			standardREST(stub)
+			adapter, sess := newCollectEnv(t, stub)
+
+			_, err := adapter.collect(context.Background(), sess.tp, testTarget(t), forge.CollectOptions{})
+			var rlErr *forge.ErrRateLimited
+			if tc.wantRate {
+				if !errors.As(err, &rlErr) {
+					t.Fatalf("remaining %d: want ErrRateLimited, got %v", tc.remaining, err)
+				}
+			} else if err != nil {
+				t.Fatalf("remaining %d: want no error, got %v", tc.remaining, err)
+			}
+		})
 	}
 }
