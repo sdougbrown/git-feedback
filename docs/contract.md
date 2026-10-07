@@ -52,6 +52,9 @@ Every subcommand writes exactly one JSON value to stdout. Go types live in
 - Pending events are the selected stream's events minus that consumer's acknowledgements, with `seq > after` and `seq <= hw`, ordered ascending. Without `--after`, capture that stream's current maximum seq. An empty stream has high-water mark 0. Later events stay pending for the next page sequence.
 - `--limit` defaults to 50; valid range is 1–200. A malformed or cross-stream/consumer cursor is a usage error (exit 2).
 - Consumer names match `^[A-Za-z0-9._-]{1,64}$`. A new consumer name sees all history.
+- `inbox --ids-only` renders `events` as an array of plain event ID strings
+  instead of full event records; acknowledgement and cursor semantics are
+  unchanged.
 
 ## Integration modes
 

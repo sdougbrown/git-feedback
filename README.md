@@ -34,7 +34,7 @@ intercepts `git feedback --help` before it reaches the tool).
 ```
 git-feedback reconcile <URL> [--head <SHA>] [--account <LOGIN>] [--state-dir <DIR>] [--json]
 git-feedback snapshot <URL> --snapshot <ID> --output <FILE> [--account <LOGIN>] [--state-dir <DIR>] [--json]
-git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--json]
+git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--json]
 git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--account <LOGIN>] [--state-dir <DIR>] [--json]
 git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--json]
 ```
@@ -91,7 +91,9 @@ high-water mark; newer events remain pending for the next sequence. The cursor i
 base64url of `{"t":"<Target.ID>","a":"<account>","c":"<consumer>","hw":<seq>,"after":<seq>}`
 and is bound to the selected account, target, and consumer. A malformed or
 cross-stream/cross-consumer cursor is a usage error (exit 2). A new consumer name
-sees all history.
+sees all history. With `--ids-only`, `events` contains plain event ID strings
+instead of full records — handy for building `ack --event` arguments without
+parsing the full envelope.
 
 ## Explicit acknowledgement
 

@@ -75,22 +75,22 @@ type Error struct {
 
 // Result is the single JSON value every subcommand writes to stdout.
 type Result struct {
-	Schema             string           `json:"schema"`
-	Command            string           `json:"command"`
-	Status             string           `json:"status"`
-	Target             *Target          `json:"target"`
-	Account            *string          `json:"account"`
-	ObservedHead       *string          `json:"observed_head"`
-	ExpectedHead       *string          `json:"expected_head"`
-	Snapshot           *Snapshot        `json:"snapshot"`
-	Attempt            *Attempt         `json:"attempt"`
-	Freshness          Freshness        `json:"freshness"`
-	ReviewerCompletion string           `json:"reviewer_completion"`
-	Events             []map[string]any `json:"events"`
-	HasMore            bool             `json:"has_more"`
-	NextCursor         *string          `json:"next_cursor"`
-	Export             *Export          `json:"export"`
-	Error              *Error           `json:"error"`
+	Schema             string    `json:"schema"`
+	Command            string    `json:"command"`
+	Status             string    `json:"status"`
+	Target             *Target   `json:"target"`
+	Account            *string   `json:"account"`
+	ObservedHead       *string   `json:"observed_head"`
+	ExpectedHead       *string   `json:"expected_head"`
+	Snapshot           *Snapshot `json:"snapshot"`
+	Attempt            *Attempt  `json:"attempt"`
+	Freshness          Freshness `json:"freshness"`
+	ReviewerCompletion string    `json:"reviewer_completion"`
+	Events             []any     `json:"events"`
+	HasMore            bool      `json:"has_more"`
+	NextCursor         *string   `json:"next_cursor"`
+	Export             *Export   `json:"export"`
+	Error              *Error    `json:"error"`
 }
 
 // Write emits exactly one JSON value for r to w, applying the envelope
@@ -105,7 +105,7 @@ func Write(w io.Writer, r Result) error {
 		r.ReviewerCompletion = ReviewerCompletionUnknown
 	}
 	if r.Events == nil {
-		r.Events = []map[string]any{}
+		r.Events = []any{}
 	}
 	return json.NewEncoder(w).Encode(r)
 }
