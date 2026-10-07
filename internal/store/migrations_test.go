@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -8,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sdougbrown/git-feedback/internal/clock"
 )
 
 // TestRefuseNewerSchema verifies that a store whose schema version is newer
@@ -133,6 +136,91 @@ func TestOpenLockedStoreRealBusyIsRetriable(t *testing.T) {
 	}
 	if se.Code != CodeStore {
 		t.Fatalf("code = %s, want %s (message: %s)", se.Code, CodeStore, se.Message)
+	}
+}
+
+// TestMigrationSelfIdentityPreservesRows builds a populated pre-0003 store by
+// applying 0001 and 0002 directly, then opens it with the store so 0003
+// applies, and asserts the seeded objects and events survive with an empty
+// author (legacy rows are always deliverable).
+func TestMigrationSelfIdentityPreservesRows(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(dir, dbFilename)
+	db, err := sql.Open("sqlite", dsn(path, 5000))
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys = 1"); err != nil {
+		t.Fatalf("pragma: %v", err)
+	}
+	ms, _, err := discoverMigrations()
+	if err != nil {
+		t.Fatalf("discover migrations: %v", err)
+	}
+	for _, m := range ms {
+		if m.version != 1 && m.version != 2 {
+			continue
+		}
+		if _, err := db.Exec(m.sql); err != nil {
+			t.Fatalf("apply %s: %v", m.name, err)
+		}
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`); err != nil {
+		t.Fatalf("schema_version: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO schema_version (version) VALUES (2)`); err != nil {
+		t.Fatalf("record version: %v", err)
+	}
+	seed := []string{
+		`INSERT INTO targets (stream_id, target_id, account, host, target_json)
+		 VALUES (1, 'github:github.com:owner/name:7', 'alice', 'github.com', '{}')`,
+		`INSERT INTO snapshots (id, stream_id, head, fingerprint, body, collected_start, collected_end)
+		 VALUES (1, 1, 'h1', 'fp', '{}', '2026-07-01T11:59:00Z', '2026-07-01T12:00:00Z')`,
+		`INSERT INTO objects (stream_id, kind, provider_id, counter, present, last_fingerprint)
+		 VALUES (1, 'thread', 't1', 1, 1, 'fp')`,
+		`INSERT INTO events (stream_id, kind, object_kind, object_id, revision, url, snapshot_id, observed_at)
+		 VALUES (1, 'initial_observation', 'thread', 't1', 1, 'u', 1, '2026-07-01T12:00:00Z')`,
+	}
+	for _, q := range seed {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("seed: %v: %v", q, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	st, err := Open(dir, Options{Clock: clock.NewFake(baseTime)})
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer st.Close()
+
+	// The object row survives with an empty author (legacy, always deliverable).
+	var author string
+	if err := st.db.QueryRow(`SELECT author FROM objects WHERE stream_id = 1 AND provider_id = 't1'`).Scan(&author); err != nil {
+		t.Fatalf("read object author: %v", err)
+	}
+	if author != "" {
+		t.Fatalf("object author = %q, want '' (legacy rows keep empty author)", author)
+	}
+	// The event row survives with an empty author.
+	if err := st.db.QueryRow(`SELECT author FROM events WHERE stream_id = 1`).Scan(&author); err != nil {
+		t.Fatalf("read event author: %v", err)
+	}
+	if author != "" {
+		t.Fatalf("event author = %q, want '' (legacy rows keep empty author)", author)
+	}
+	// The legacy event is still delivered (pending) for a new consumer.
+	pending, err := st.Inbox(context.Background(), InboxInput{TargetID: "github:github.com:owner/name:7", Account: "alice", Consumer: "c2", Limit: MaxInboxLimit})
+	if err != nil {
+		t.Fatalf("inbox: %v", err)
+	}
+	if len(pending.Events) != 1 || pending.Events[0].ID != "e1" {
+		t.Fatalf("pending events = %+v, want e1", pending.Events)
 	}
 }
 

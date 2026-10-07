@@ -32,12 +32,20 @@ func handleInbox(ctx context.Context, inv Invocation) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	// Unless --exclude-self, filter out the stream's own account's
+	// self-authored events. The account is already canonical from
+	// resolveLocal.
+	excludeAuthor := ""
+	if !inv.Bools["exclude-self"] {
+		excludeAuthor = account
+	}
 	page, err := st.Inbox(ctx, store.InboxInput{
-		TargetID: t.ID,
-		Account:  account,
-		Consumer: consumer,
-		Cursor:   inv.Flags["after"],
-		Limit:    limit,
+		TargetID:      t.ID,
+		Account:       account,
+		Consumer:      consumer,
+		Cursor:        inv.Flags["after"],
+		Limit:         limit,
+		ExcludeAuthor: excludeAuthor,
 	})
 	if err != nil {
 		return Result{}, mapStoreError(err)

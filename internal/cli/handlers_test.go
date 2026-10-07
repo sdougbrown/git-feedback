@@ -61,6 +61,35 @@ func publishHandler(t *testing.T, st *store.Store, account string) {
 	}
 }
 
+// publishMixedHandler publishes one snapshot where account authors one of
+// each feedback kind and "rev" authors the rest, so the self filter has
+// something to catch.
+func publishMixedHandler(t *testing.T, st *store.Store, account string) {
+	t.Helper()
+	snap := &forge.Snapshot{
+		Head:           "headA",
+		CollectedStart: handlerBaseTime.Add(-time.Minute),
+		CollectedEnd:   handlerBaseTime,
+		Threads: []forge.Thread{
+			{ID: "t1", Author: account, Body: "own thread", Path: "a.go"},
+			{ID: "t2", Author: "rev", Body: "rev thread", Path: "b.go"},
+		},
+		Reviews: []forge.Review{
+			{ID: "r1", Author: account, Body: "own review", State: "APPROVED"},
+			{ID: "r2", Author: "rev", Body: "rev review", State: "APPROVED"},
+		},
+		Comments: []forge.Comment{
+			{ID: "c1", Author: account, Body: "own comment"},
+			{ID: "c2", Author: "rev", Body: "rev comment"},
+		},
+	}
+	if _, err := st.Publish(context.Background(), store.PublishInput{
+		Target: handlerTarget(), Account: account, Snapshot: snap,
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+}
+
 // runCLI runs one invocation and decodes the envelope.
 func runCLI(t *testing.T, argv []string) (code int, env map[string]any, stdout string) {
 	t.Helper()
@@ -401,6 +430,54 @@ func TestInboxIDsOnly(t *testing.T) {
 	if len(page.Events) != 4 {
 		t.Errorf("stored pending events = %d, want 4", len(page.Events))
 	}
+}
+
+// TestInboxExcludeSelf: default delivery excludes the stream's own account's
+// self-authored objects; --exclude-self restores them. The contract holds in
+// both.
+func TestInboxExcludeSelf(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishMixedHandler(t, st, "alice")
+
+	t.Run("default excludes own objects", func(t *testing.T) {
+		code, env, _ := runCLI(t, []string{"inbox", "--consumer", "ci", "--state-dir", dir, handlerURL})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertContract(t, env)
+		events := env["events"].([]any)
+		// 1 target + 3 rev-authored (thread, review, comment) = 4
+		if len(events) != 4 {
+			t.Fatalf("events = %d, want 4 (target + rev objects)", len(events))
+		}
+		for _, e := range events {
+			if a, ok := e.(map[string]any)["author"].(string); ok && a == "alice" {
+				t.Errorf("event has author alice, want filtered")
+			}
+		}
+	})
+
+	t.Run("--exclude-self restores own objects", func(t *testing.T) {
+		code, env, _ := runCLI(t, []string{"inbox", "--consumer", "ci", "--exclude-self", "--state-dir", dir, handlerURL})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertContract(t, env)
+		events := env["events"].([]any)
+		// 1 target + 2 own + 2 rev (threads, reviews, comments) = 7
+		if len(events) != 7 {
+			t.Fatalf("events = %d, want 7 (target + all objects)", len(events))
+		}
+		var hasOwn bool
+		for _, e := range events {
+			if a, ok := e.(map[string]any)["author"].(string); ok && a == "alice" {
+				hasOwn = true
+			}
+		}
+		if !hasOwn {
+			t.Error("--exclude-self did not restore the account's own objects")
+		}
+	})
 }
 
 func TestAckRejectsUnknownID(t *testing.T) {

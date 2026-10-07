@@ -124,3 +124,160 @@ func TestDSNPathEscaping(t *testing.T) {
 		t.Fatalf("events = %d (%v), want 2", len(evs), eventKinds(evs))
 	}
 }
+
+// TestInboxExcludeAuthor filters out events whose author equals the excluded
+// canonical login, while author-less (legacy) and other authors' events are
+// always delivered.
+func TestInboxExcludeAuthor(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	// alice authors one thread, one review, one comment; rev authors one of
+	// each. The target object is synthetic (author '').
+	snap := &forge.Snapshot{
+		Head:           "headA",
+		CollectedStart: baseTime.Add(-time.Minute),
+		CollectedEnd:   baseTime,
+		Threads: []forge.Thread{
+			{ID: "t1", Author: "alice", Body: "alice thread", Path: "a.go"},
+			{ID: "t2", Author: "rev", Body: "rev thread", Path: "b.go"},
+		},
+		Reviews: []forge.Review{
+			{ID: "r1", Author: "alice", Body: "alice review", State: "APPROVED"},
+			{ID: "r2", Author: "rev", Body: "rev review", State: "APPROVED"},
+		},
+		Comments: []forge.Comment{
+			{ID: "c1", Author: "alice", Body: "alice comment", CreatedAt: baseTime},
+			{ID: "c2", Author: "rev", Body: "rev comment", CreatedAt: baseTime},
+		},
+	}
+	publish(t, st, "alice", snap)
+
+	// 1. Empty ExcludeAuthor returns everything (compatibility).
+	all := events(t, st, "alice", "c1")
+	// 1 target + 2 threads + 2 reviews + 2 comments = 7
+	if len(all) != 7 {
+		t.Fatalf("all events = %d (%v), want 7", len(all), eventKinds(all))
+	}
+
+	// 2. ExcludeAuthor "alice" filters out alice-authored events.
+	res, err := st.Inbox(ctx, InboxInput{
+		TargetID: testTarget().ID, Account: "alice", Consumer: "c1",
+		ExcludeAuthor: "alice", Limit: MaxInboxLimit,
+	})
+	if err != nil {
+		t.Fatalf("inbox exclude: %v", err)
+	}
+	// 1 target + 3 rev-authored (thread, review, comment) = 4
+	if len(res.Events) != 4 {
+		t.Fatalf("filtered events = %d (%v), want 4", len(res.Events), eventKinds(res.Events))
+	}
+	for _, ev := range res.Events {
+		if ev.Author == "alice" {
+			t.Errorf("event %s has author alice, want filtered", ev.ID)
+		}
+		if ev.ObjectKind != "target" && ev.Author != "rev" {
+			t.Errorf("event %s has author %q, want rev or target", ev.ID, ev.Author)
+		}
+	}
+	var hasTarget bool
+	for _, ev := range res.Events {
+		if ev.ObjectKind == "target" {
+			hasTarget = true
+		}
+	}
+	if !hasTarget {
+		t.Error("target event missing from filtered result")
+	}
+
+	// 3. Pagination with ExcludeAuthor terminates correctly: no duplicates,
+	// no misses beyond the filtered ones.
+	seen := map[string]bool{}
+	var total int
+	cursor := ""
+	for i := 0; i < 10; i++ {
+		page, err := st.Inbox(ctx, InboxInput{
+			TargetID: testTarget().ID, Account: "alice", Consumer: "c1",
+			ExcludeAuthor: "alice", Limit: 2, Cursor: cursor,
+		})
+		if err != nil {
+			t.Fatalf("inbox page %d: %v", i, err)
+		}
+		for _, ev := range page.Events {
+			if seen[ev.ID] {
+				t.Errorf("event %s appears on multiple pages", ev.ID)
+			}
+			seen[ev.ID] = true
+			total++
+		}
+		if !page.HasMore {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	if total != 4 {
+		t.Fatalf("paged events = %d, want 4 (no duplicates, no misses beyond filtered)", total)
+	}
+
+	// 4. A legacy row (author '') is delivered under ExcludeAuthor. Simulate
+	// a pre-0003 event row by inserting one with an empty author.
+	var streamID int64
+	if err := st.db.QueryRow(`SELECT stream_id FROM targets WHERE target_id = ?`, testTarget().ID).Scan(&streamID); err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	var snapID int64
+	if err := st.db.QueryRow(`SELECT id FROM snapshots WHERE stream_id = ?`, streamID).Scan(&snapID); err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	if _, err := st.db.Exec(
+		`INSERT INTO events (stream_id, kind, object_kind, object_id, revision, url, snapshot_id, observed_at, author)
+		 VALUES (?, 'revision', 'thread', 'legacy', 1, 'u', ?, '2026-07-01T12:00:00Z', '')`,
+		streamID, snapID); err != nil {
+		t.Fatalf("insert legacy event: %v", err)
+	}
+	res, err = st.Inbox(ctx, InboxInput{
+		TargetID: testTarget().ID, Account: "alice", Consumer: "c1",
+		ExcludeAuthor: "alice", Limit: MaxInboxLimit,
+	})
+	if err != nil {
+		t.Fatalf("inbox legacy: %v", err)
+	}
+	var hasLegacy bool
+	for _, ev := range res.Events {
+		if ev.ObjectID == "legacy" && ev.Author == "" {
+			hasLegacy = true
+		}
+	}
+	if !hasLegacy {
+		t.Error("legacy event (author '') not delivered under ExcludeAuthor")
+	}
+
+	// 5. Author canonicalization: a login stored with different case is
+	// still the same account and must filter.
+	snap2 := &forge.Snapshot{
+		Head:           "headB",
+		CollectedStart: baseTime.Add(-time.Minute),
+		CollectedEnd:   baseTime.Add(time.Minute),
+		Threads:        []forge.Thread{{ID: "t3", Author: "Alice", Body: "alice again", Path: "c.go"}},
+	}
+	publish(t, st, "alice", snap2)
+	var stored string
+	if err := st.db.QueryRow(`SELECT author FROM events WHERE object_id = 't3' LIMIT 1`).Scan(&stored); err != nil {
+		t.Fatalf("read t3 author: %v", err)
+	}
+	if stored != "alice" {
+		t.Errorf("stored t3 author = %q, want canonical alice", stored)
+	}
+	res, err = st.Inbox(ctx, InboxInput{
+		TargetID: testTarget().ID, Account: "alice", Consumer: "c1",
+		ExcludeAuthor: "alice", Limit: MaxInboxLimit,
+	})
+	if err != nil {
+		t.Fatalf("inbox t3: %v", err)
+	}
+	for _, ev := range res.Events {
+		if ev.ObjectID == "t3" {
+			t.Errorf("event %s for author 'Alice' not filtered under ExcludeAuthor alice", ev.ID)
+		}
+	}
+}

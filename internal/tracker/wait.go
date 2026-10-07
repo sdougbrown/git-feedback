@@ -44,6 +44,10 @@ type WaitInput struct {
 	Consumer string
 	// Limit bounds the delivered page (0 uses the store default).
 	Limit int
+	// ExcludeSelf, when false (the default), filters out events whose author
+	// equals the stream's own account from delivery. When true, all events
+	// are delivered. The filter follows the account known at each cycle.
+	ExcludeSelf bool
 }
 
 // WaitResult is the terminal wait outcome: delivered events or the
@@ -269,11 +273,18 @@ func wakeTime(res Result, rerr error, cycleCut bool, eng *Engine) time.Time {
 // does not exist yet. A transient store failure surfaces as
 // errTransientStore so the loop retries it until the deadline.
 func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, account string, in WaitInput) (WaitResult, bool, error) {
+	// The self filter always applies for the cycle's known account (the
+	// only case where backlog runs).
+	excludeAuthor := ""
+	if !in.ExcludeSelf {
+		excludeAuthor = forge.CanonicalAccount(account)
+	}
 	page, err := eng.Store.Inbox(ctx, store.InboxInput{
-		TargetID: target.ID,
-		Account:  account,
-		Consumer: in.Consumer,
-		Limit:    in.Limit,
+		TargetID:      target.ID,
+		Account:       account,
+		Consumer:      in.Consumer,
+		Limit:         in.Limit,
+		ExcludeAuthor: excludeAuthor,
 	})
 	if err != nil {
 		var se *store.Error

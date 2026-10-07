@@ -37,11 +37,13 @@ type PublishResult struct {
 	Changed bool
 }
 
-// objectState is one object's observed state for fingerprinting and identity.
+// objectState is one object's observed state for fingerprinting, identity,
+// and delivery filtering.
 type objectState struct {
 	kind        forge.Kind
 	id          string
 	fingerprint string
+	author      string
 }
 
 // sha256hex hashes s and returns the lowercase hex digest.
@@ -60,14 +62,18 @@ func collectObjects(snap forge.Snapshot) []objectState {
 	sort.SliceStable(reviews, func(i, j int) bool { return reviews[i].ID < reviews[j].ID })
 	sort.SliceStable(comments, func(i, j int) bool { return comments[i].ID < comments[j].ID })
 	objs := make([]objectState, 0, len(threads)+len(reviews)+len(comments))
+	// The forge fingerprints already cover Author, so the author is part of
+	// the identity; it is carried separately here only for delivery. The
+	// author is canonicalized at this choke point so the delivery filter's
+	// comparison against the canonical account is case-insensitive.
 	for _, t := range threads {
-		objs = append(objs, objectState{forge.KindThread, t.ID, forge.FingerprintThread(t)})
+		objs = append(objs, objectState{forge.KindThread, t.ID, forge.FingerprintThread(t), forge.CanonicalAccount(t.Author)})
 	}
 	for _, r := range reviews {
-		objs = append(objs, objectState{forge.KindReview, r.ID, forge.FingerprintReview(r)})
+		objs = append(objs, objectState{forge.KindReview, r.ID, forge.FingerprintReview(r), forge.CanonicalAccount(r.Author)})
 	}
 	for _, c := range comments {
-		objs = append(objs, objectState{forge.KindComment, c.ID, forge.FingerprintComment(c)})
+		objs = append(objs, objectState{forge.KindComment, c.ID, forge.FingerprintComment(c), forge.CanonicalAccount(c.Author)})
 	}
 	return objs
 }
@@ -291,8 +297,8 @@ func recordObservation(ctx context.Context, tx *sql.Tx, streamID, snapID int64, 
 }
 
 // bumpObject advances an object's counter, records the revision occurrence,
-// and updates its presence state.
-func bumpObject(ctx context.Context, tx *sql.Tx, streamID int64, kind, id, fp string, present bool, snapID int64) (int64, error) {
+// and updates its presence state and author.
+func bumpObject(ctx context.Context, tx *sql.Tx, streamID int64, kind, id, fp, author string, present bool, snapID int64) (int64, error) {
 	var counter int64
 	err := tx.QueryRowContext(ctx,
 		`SELECT counter FROM objects WHERE stream_id = ? AND kind = ? AND provider_id = ?`,
@@ -304,11 +310,11 @@ func bumpObject(ctx context.Context, tx *sql.Tx, streamID int64, kind, id, fp st
 		return 0, &Error{Code: CodeStore, Message: fmt.Sprintf("read object: %v", err)}
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO objects (stream_id, kind, provider_id, counter, present, last_fingerprint)
-		 VALUES (?, ?, ?, ?, ?, ?)
+		`INSERT INTO objects (stream_id, kind, provider_id, counter, present, last_fingerprint, author)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(stream_id, kind, provider_id) DO UPDATE SET
-		   counter = excluded.counter, present = excluded.present, last_fingerprint = excluded.last_fingerprint`,
-		streamID, kind, id, newCounter, boolToInt(present), fp); err != nil {
+		   counter = excluded.counter, present = excluded.present, last_fingerprint = excluded.last_fingerprint, author = excluded.author`,
+		streamID, kind, id, newCounter, boolToInt(present), fp, author); err != nil {
 		return 0, &Error{Code: CodeStore, Message: fmt.Sprintf("update object: %v", err)}
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -330,28 +336,28 @@ func boolToInt(b bool) int {
 // updates object state. currentExists is false on a stream's initial
 // publication; currentHead is then ignored.
 func (s *Store) emitEvents(ctx context.Context, tx *sql.Tx, streamID int64, in PublishInput, snap forge.Snapshot, currentExists bool, currentHead string, snapID int64, now time.Time) error {
-	// Target head event.
+	// Target head event. The synthetic target object has no author.
 	if currentExists && currentHead != snap.Head {
-		rev, err := bumpObject(ctx, tx, streamID, objectKindTarget, in.Target.ID, sha256hex(snap.Head), true, snapID)
+		rev, err := bumpObject(ctx, tx, streamID, objectKindTarget, in.Target.ID, sha256hex(snap.Head), "", true, snapID)
 		if err != nil {
 			return err
 		}
 		if err := insertEvent(ctx, tx, streamID, eventInsert{
 			kind: KindHeadChanged, objectKind: objectKindTarget, objectID: in.Target.ID,
 			revision: rev, url: in.Target.URL, snapshotID: snapID, observedAt: now,
-			headBefore: currentHead, headAfter: snap.Head,
+			headBefore: currentHead, headAfter: snap.Head, author: "",
 		}); err != nil {
 			return err
 		}
 	} else if !currentExists {
-		rev, err := bumpObject(ctx, tx, streamID, objectKindTarget, in.Target.ID, sha256hex(snap.Head), true, snapID)
+		rev, err := bumpObject(ctx, tx, streamID, objectKindTarget, in.Target.ID, sha256hex(snap.Head), "", true, snapID)
 		if err != nil {
 			return err
 		}
 		if err := insertEvent(ctx, tx, streamID, eventInsert{
 			kind: KindInitialObservation, objectKind: objectKindTarget, objectID: in.Target.ID,
 			revision: rev, url: in.Target.URL, snapshotID: snapID, observedAt: now,
-			headAfter: snap.Head,
+			headAfter: snap.Head, author: "",
 		}); err != nil {
 			return err
 		}
@@ -371,13 +377,14 @@ func (s *Store) emitEvents(ctx context.Context, tx *sql.Tx, streamID int64, in P
 		switch {
 		case err == sql.ErrNoRows:
 			// First observation of this object in the stream.
-			rev, err := bumpObject(ctx, tx, streamID, string(o.kind), o.id, o.fingerprint, true, snapID)
+			rev, err := bumpObject(ctx, tx, streamID, string(o.kind), o.id, o.fingerprint, o.author, true, snapID)
 			if err != nil {
 				return err
 			}
 			if err := insertEvent(ctx, tx, streamID, eventInsert{
 				kind: KindInitialObservation, objectKind: string(o.kind), objectID: o.id,
 				revision: rev, url: in.Target.URL, snapshotID: snapID, observedAt: now,
+				author: o.author,
 			}); err != nil {
 				return err
 			}
@@ -385,25 +392,27 @@ func (s *Store) emitEvents(ctx context.Context, tx *sql.Tx, streamID int64, in P
 			return &Error{Code: CodeStore, Message: fmt.Sprintf("read object: %v", err)}
 		case !prev.present:
 			// Reappearance after a not_observed gets a new revision.
-			rev, err := bumpObject(ctx, tx, streamID, string(o.kind), o.id, o.fingerprint, true, snapID)
+			rev, err := bumpObject(ctx, tx, streamID, string(o.kind), o.id, o.fingerprint, o.author, true, snapID)
 			if err != nil {
 				return err
 			}
 			if err := insertEvent(ctx, tx, streamID, eventInsert{
 				kind: KindRevision, objectKind: string(o.kind), objectID: o.id,
 				revision: rev, url: in.Target.URL, snapshotID: snapID, observedAt: now,
+				author: o.author,
 			}); err != nil {
 				return err
 			}
 		case prev.lastFp != o.fingerprint:
 			// Content changed; the revision counter advances.
-			rev, err := bumpObject(ctx, tx, streamID, string(o.kind), o.id, o.fingerprint, true, snapID)
+			rev, err := bumpObject(ctx, tx, streamID, string(o.kind), o.id, o.fingerprint, o.author, true, snapID)
 			if err != nil {
 				return err
 			}
 			if err := insertEvent(ctx, tx, streamID, eventInsert{
 				kind: KindRevision, objectKind: string(o.kind), objectID: o.id,
 				revision: rev, url: in.Target.URL, snapshotID: snapID, observedAt: now,
+				author: o.author,
 			}); err != nil {
 				return err
 			}
@@ -416,19 +425,19 @@ func (s *Store) emitEvents(ctx context.Context, tx *sql.Tx, streamID int64, in P
 	var absent []objectState
 	for _, k := range []string{string(forge.KindThread), string(forge.KindReview), string(forge.KindComment)} {
 		rows, err := tx.QueryContext(ctx,
-			`SELECT provider_id, last_fingerprint FROM objects WHERE stream_id = ? AND kind = ? AND present = 1`,
+			`SELECT provider_id, last_fingerprint, author FROM objects WHERE stream_id = ? AND kind = ? AND present = 1`,
 			streamID, k)
 		if err != nil {
 			return &Error{Code: CodeStore, Message: fmt.Sprintf("read objects: %v", err)}
 		}
 		for rows.Next() {
-			var id, fp string
-			if err := rows.Scan(&id, &fp); err != nil {
+			var id, fp, author string
+			if err := rows.Scan(&id, &fp, &author); err != nil {
 				rows.Close()
 				return &Error{Code: CodeStore, Message: fmt.Sprintf("read objects: %v", err)}
 			}
 			if !present[k][id] {
-				absent = append(absent, objectState{kind: forge.Kind(k), id: id, fingerprint: fp})
+				absent = append(absent, objectState{kind: forge.Kind(k), id: id, fingerprint: fp, author: author})
 			}
 		}
 		if err := rows.Err(); err != nil {
@@ -444,13 +453,16 @@ func (s *Store) emitEvents(ctx context.Context, tx *sql.Tx, streamID int64, in P
 		return absent[i].id < absent[j].id
 	})
 	for _, o := range absent {
-		rev, err := bumpObject(ctx, tx, streamID, string(o.kind), o.id, o.fingerprint, false, snapID)
+		// The not_observed event carries the last known author (read from the
+		// objects table above); the object row keeps that author.
+		rev, err := bumpObject(ctx, tx, streamID, string(o.kind), o.id, o.fingerprint, o.author, false, snapID)
 		if err != nil {
 			return err
 		}
 		if err := insertEvent(ctx, tx, streamID, eventInsert{
 			kind: KindNotObserved, objectKind: string(o.kind), objectID: o.id,
 			revision: rev, url: in.Target.URL, snapshotID: snapID, observedAt: now,
+			author: o.author,
 		}); err != nil {
 			return err
 		}

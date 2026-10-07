@@ -185,7 +185,8 @@ func attemptEnvelope(a store.Attempt) *Attempt {
 }
 
 // eventMap renders one stored event as an envelope event record. Head
-// fields appear only on head events.
+// fields appear only on head events; author appears only when the event
+// has a non-empty author (author-less and synthetic target events omit it).
 func eventMap(ev store.Event) map[string]any {
 	m := map[string]any{
 		"id":          ev.ID,
@@ -202,6 +203,9 @@ func eventMap(ev store.Event) map[string]any {
 	}
 	if ev.HeadAfter != "" {
 		m["head_after"] = ev.HeadAfter
+	}
+	if ev.Author != "" {
+		m["author"] = ev.Author
 	}
 	return m
 }
