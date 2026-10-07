@@ -318,6 +318,9 @@ type cliResult struct {
 // the test fails when the binary outlives it.
 func runCLI(ctx context.Context, t *testing.T, bin string, env []string, args ...string) cliResult {
 	t.Helper()
+	if _, err := os.Stat(bin); err != nil {
+		t.Skipf("run make test-bin first")
+	}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = env
 	var out, errb strings.Builder
