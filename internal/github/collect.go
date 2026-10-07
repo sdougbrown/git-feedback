@@ -107,7 +107,7 @@ func (a *Adapter) collect(ctx context.Context, tp *Transport, t forge.Target, o 
 	inv.Snapshot.CollectedStart = start
 	inv.Snapshot.CollectedEnd = inv.CollectedEnd
 	// Synthetic target object: metadata tracking the stable collected head.
-	inv.Objects = append(inv.Objects, Object{Kind: "target", ProviderID: t.ID, Head: inv.Head})
+	inv.Objects = append(inv.Objects, Object{Kind: forge.KindTarget, ProviderID: t.ID, Head: inv.Head})
 
 	for _, th := range threads {
 		ft, err := normalizeThread(th)

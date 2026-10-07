@@ -9,6 +9,7 @@ const (
 	KindThread  Kind = "thread"
 	KindReview  Kind = "review"
 	KindComment Kind = "comment"
+	KindTarget  Kind = "target"
 )
 
 // ThreadComment is one nested reply inside a review thread.

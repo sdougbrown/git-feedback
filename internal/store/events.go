@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/sdougbrown/git-feedback/internal/forge"
 )
 
 // Event kinds as pinned by the plan.
@@ -17,7 +19,7 @@ const (
 
 // objectKindTarget is the synthetic target object kind that tracks the
 // collected head. It is metadata, not a finding.
-const objectKindTarget = "target"
+const objectKindTarget = string(forge.KindTarget)
 
 // Event is one durable occurrence in a stream's history.
 type Event struct {
