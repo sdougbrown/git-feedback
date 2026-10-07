@@ -265,8 +265,15 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 		}
 		return Result{Status: StatusError, Target: target, Account: account, HasAccount: true, Attempt: att, Session: sess}, collErr
 	}
-	// A nil error with an incomplete result is an adapter contract bug.
-	return Result{Status: StatusError, Target: target, Account: account, HasAccount: true, Session: sess}, forge.ErrIncomplete
+	// A nil error with an incomplete result is an adapter contract bug:
+	// fenced failure finalization (cadence and lease release), then surface.
+	att := e.finalizeFenced(ctx, host, account, token, streamID, store.AttemptInput{
+		Outcome:   store.OutcomeFailed,
+		Complete:  false,
+		ErrorCode: errorCode(forge.ErrIncomplete),
+		NextDue:   e.Clock.Now().Add(min),
+	})
+	return Result{Status: StatusError, Target: target, Account: account, HasAccount: true, Attempt: att, Session: sess}, forge.ErrIncomplete
 }
 
 // publish publishes the complete inventory with the fence and finalizes

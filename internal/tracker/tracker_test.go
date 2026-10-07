@@ -533,3 +533,53 @@ func TestEngineDefaultsKeepGatesDurable(t *testing.T) {
 		t.Fatalf("persisted remaining = %d, want 4990", remaining)
 	}
 }
+
+// fakeSession is a forge.Session for tests that supply a verified session
+// (skipping admission and verification).
+type fakeSession struct{ login string }
+
+func (s *fakeSession) Login() string { return s.login }
+
+// incompleteAdapter is a forge.Adapter whose Collect returns a nil error
+// with an incomplete result, exercising the adapter-contract-bug exit.
+type incompleteAdapter struct{}
+
+func (a *incompleteAdapter) Host() string { return testHost }
+func (a *incompleteAdapter) ParseTarget(raw string) (forge.Target, error) {
+	return forge.Target{}, errors.New("not used")
+}
+func (a *incompleteAdapter) Authenticate(ctx context.Context, account string) (forge.Session, error) {
+	return nil, errors.New("not used")
+}
+func (a *incompleteAdapter) Collect(ctx context.Context, s forge.Session, t forge.Target, o forge.CollectOptions) (forge.CollectResult, error) {
+	return forge.CollectResult{Complete: false}, nil
+}
+
+// TestNilErrorIncompleteReleasesLease: a nil error with an incomplete
+// result (an adapter contract bug) releases the lease via fenced
+// finalization, so a second Reconcile does not report lease_busy.
+func TestNilErrorIncompleteReleasesLease(t *testing.T) {
+	e := newEnv(t)
+	// Establish the stream (and a baseline snapshot) with a real cycle.
+	res1 := e.reconcile(ReconcileInput{URL: testURL})
+	if res1.Status != StatusUpdated {
+		t.Fatalf("first status = %s, want updated", res1.Status)
+	}
+	e.clk.Advance(61 * time.Second) // pass the persisted next_due
+	// Now substitute a fake adapter that returns (nil, incomplete).
+	e.eng.NewAdapter = func(svcs Services) forge.Adapter {
+		return &incompleteAdapter{}
+	}
+	sess := &fakeSession{login: "alice"}
+	_, err := e.eng.Reconcile(context.Background(), ReconcileInput{URL: testURL, Session: sess})
+	if !errors.Is(err, forge.ErrIncomplete) {
+		t.Fatalf("err = %v, want ErrIncomplete", err)
+	}
+	// The lease was released: a second cycle acquires and defers on the
+	// persisted next_due (not lease_busy).
+	res := e.reconcile(ReconcileInput{URL: testURL, Session: sess})
+	if res.Status == StatusBusy {
+		t.Fatalf("second status = %s, want not busy (lease leaked)", res.Status)
+	}
+	if res.Status != StatusDeferred {
+		t.Fatalf("second status = %s, want deferred", res.Status)
