@@ -409,6 +409,27 @@ func TestAckRejectsUnknownID(t *testing.T) {
 	}
 }
 
+func TestWaitInvalidConsumerIsUsage(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+
+	// A stored stream means the backlog inbox check runs before any
+	// authentication, so the pinned-pattern rejection surfaces immediately.
+	// The deadline must outlive store setup (open + account resolution);
+	// the invalid consumer is rejected at the inbox check, so the wait
+	// returns well before the deadline rather than waiting it out.
+	code, env, _ := runCLI(t, []string{
+		"wait", "--timeout", "5s", "--consumer", "bad name!", "--state-dir", dir, handlerURL,
+	})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	if env["error"].(map[string]any)["code"] != "usage" {
+		t.Errorf("error = %v, want usage", env["error"])
+	}
+}
+
 func TestAckUsageErrors(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")
