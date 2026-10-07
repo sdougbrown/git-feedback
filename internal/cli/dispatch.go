@@ -165,6 +165,11 @@ func parseInvocation(argv []string) (Invocation, error) {
 	return inv, nil
 }
 
+// testPendingSignal is a test-only injection: when non-nil, Run injects it
+// into the signal channel before the envelope write, exercising the
+// post-write signal re-check. Never set outside tests.
+var testPendingSignal os.Signal
+
 // Run executes one CLI invocation: it parses argv, wires the signal- and
 // timeout-derived context, runs the handler, writes exactly one JSON
 // envelope to stdout, and returns the process exit code. Diagnostics go to
@@ -217,9 +222,25 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 	// envelope is written. No-op in the default build.
 	CrashBeforeOutput()
 
+	// Test-only: inject a pending signal before the envelope write to
+	// exercise the post-write signal re-check. No-op unless a test set it.
+	if testPendingSignal != nil {
+		select {
+		case sigCh <- testPendingSignal:
+		default:
+		}
+	}
+
 	if err := writeResult(stdout, result); err != nil {
 		fmt.Fprintln(stderr, err.Error())
 		return ExitOperational
+	}
+	// A signal that arrived during the envelope write still wins on exit
+	// code, even though the envelope may already be written.
+	select {
+	case sig := <-sigCh:
+		return SignalExitCode(sig)
+	default:
 	}
 	if result.Error != nil {
 		var ue *usageError
