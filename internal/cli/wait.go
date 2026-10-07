@@ -37,24 +37,13 @@ func handleWait(ctx context.Context, inv Invocation) (Result, error) {
 	}
 	clk := newClock()
 
-	eng := &tracker.Engine{
-		Clock: clk,
-		OpenStore: func(busy time.Duration) (*store.Store, error) {
-			return openHookedStore(inv, clk, busy)
-		},
-	}
-	hooks := ReadTestHooks()
-	apiBase, err := hooks.APIOverride()
+	eng, err := newEngineBase(clk)
 	if err != nil {
-		return Result{}, &usageError{err.Error()}
+		return Result{}, err
 	}
-	minInterval, err := hooks.Interval()
-	if err != nil {
-		return Result{}, &usageError{err.Error()}
+	eng.OpenStore = func(busy time.Duration) (*store.Store, error) {
+		return openHookedStore(inv, clk, busy)
 	}
-	eng.APIBase = apiBase
-	eng.Runner = hooks.GHRunner()
-	eng.MinInterval = minInterval
 
 	res, err := eng.Wait(ctx, tracker.WaitInput{
 		URL:      inv.URL,

@@ -8,10 +8,11 @@ import (
 	"github.com/sdougbrown/git-feedback/internal/tracker"
 )
 
-// newEngine builds the tracker engine for one invocation, applying the
-// test-only environment overrides (inert in the default build) and the
-// store-level crash hook.
-func newEngine(st *store.Store, clk clock.Clock) (*tracker.Engine, error) {
+// newEngineBase builds the tracker engine with the shared wiring: clock,
+// test-only environment overrides (inert in the default build), and the
+// gh runner. Callers set the store-specific field (Store or OpenStore)
+// and any store-level hooks.
+func newEngineBase(clk clock.Clock) (*tracker.Engine, error) {
 	hooks := ReadTestHooks()
 	apiBase, err := hooks.APIOverride()
 	if err != nil {
@@ -21,14 +22,25 @@ func newEngine(st *store.Store, clk clock.Clock) (*tracker.Engine, error) {
 	if err != nil {
 		return nil, &usageError{err.Error()}
 	}
-	hooks.ApplyStoreCrash(st)
 	return &tracker.Engine{
-		Store:       st,
 		Clock:       clk,
 		APIBase:     apiBase,
 		Runner:      hooks.GHRunner(),
 		MinInterval: minInterval,
 	}, nil
+}
+
+// newEngine builds the tracker engine for one invocation, applying the
+// test-only environment overrides (inert in the default build) and the
+// store-level crash hook.
+func newEngine(st *store.Store, clk clock.Clock) (*tracker.Engine, error) {
+	eng, err := newEngineBase(clk)
+	if err != nil {
+		return nil, err
+	}
+	eng.Store = st
+	ReadTestHooks().ApplyStoreCrash(st)
+	return eng, nil
 }
 
 // openHookedStore opens a state-dir store with the given busy timeout,
