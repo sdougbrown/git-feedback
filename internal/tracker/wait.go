@@ -91,6 +91,9 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 
 	eng, closeStore, err := e.openStoreResilient(ctx, clk, remainingOf(ctx))
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return e.timeoutResult(e, target, "", in, nil), nil
+		}
 		return WaitResult{}, err
 	}
 	defer closeStore()

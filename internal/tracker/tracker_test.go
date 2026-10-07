@@ -519,6 +519,29 @@ func TestWaitStoreOpenErrorPlumbing(t *testing.T) {
 			t.Fatalf("wait: attempts = %d, want >= 2 (retry must bite)", attempts)
 		}
 	})
+
+	t.Run("CodeStore deadline returns timeout", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
+		e.eng.OpenStore = func(busy time.Duration) (*store.Store, error) {
+			return nil, &storeOpenErr{code: "store_error", msg: "lock contention", err: &store.Error{Code: store.CodeStore, Message: "lock contention"}}
+		}
+		start := time.Now()
+		res, err := e.eng.Wait(ctx, WaitInput{URL: testURL, Consumer: "c"})
+		elapsed := time.Since(start)
+		if err != nil {
+			t.Fatalf("wait: deadline during openStoreResilient must return timeout, got error %v", err)
+		}
+		if res.Status != StatusTimeout {
+			t.Fatalf("wait status = %s, want timeout", res.Status)
+		}
+		if elapsed < 200*time.Millisecond {
+			t.Fatalf("wait: returned in %v, expected to wait until the ~300ms deadline", elapsed)
+		}
+		if elapsed > time.Second {
+			t.Fatalf("wait: took %v, expected to return promptly after the deadline", elapsed)
+		}
+	})
 }
 
 // errAdapter is a forge.Adapter whose Collect returns a fixed error, so a
