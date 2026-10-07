@@ -298,6 +298,11 @@ func TestInboxDoesNotAck(t *testing.T) {
 	if first["id"] != "e1" || first["kind"] != "initial_observation" {
 		t.Errorf("first event = %v", first)
 	}
+	// The target event is author-less; the contract omits the "author" key
+	// rather than rendering an empty value.
+	if _, hasAuthor := first["author"]; hasAuthor {
+		t.Errorf("target event carries an %q key, want omitted", "author")
+	}
 	if env["has_more"] != false || env["next_cursor"] != nil {
 		t.Errorf("has_more/next_cursor = %v/%v, want false/null", env["has_more"], env["next_cursor"])
 	}
@@ -464,7 +469,7 @@ func TestInboxExcludeSelf(t *testing.T) {
 		}
 		assertContract(t, env)
 		events := env["events"].([]any)
-		// 1 target + 2 own + 2 rev (threads, reviews, comments) = 7
+		// 1 target + 3 own + 3 rev (threads, reviews, comments) = 7
 		if len(events) != 7 {
 			t.Fatalf("events = %d, want 7 (target + all objects)", len(events))
 		}
