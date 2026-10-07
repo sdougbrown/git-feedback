@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -68,6 +69,67 @@ func TestOpenLockedStoreIsRetriable(t *testing.T) {
 	}
 	if se.Code != CodeStoreCorrupt {
 		t.Fatalf("code = %s, want %s (message: %s)", se.Code, CodeStoreCorrupt, se.Message)
+	}
+}
+
+// TestOpenLockedStoreRealBusyIsRetriable exercises a REAL driver-generated
+// SQLITE_BUSY error, not a hand-transcribed string. It opens two
+// connections to the same store: the first holds the WAL write lock via a
+// BEGIN IMMEDIATE transaction, and the second (with a zero busy timeout)
+// attempts a write that must fail with the driver's own busy error. That
+// error is fed to isLockError and corruptOrStore, so a modernc.org/sqlite
+// upgrade that changes the busy wording fails here instead of silently
+// reclassifying transient lock contention as fatal store_corrupt.
+func TestOpenLockedStoreRealBusyIsRetriable(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	st, err := Open(dir, Options{})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	path := filepath.Join(dir, dbFilename)
+
+	// Connection A holds the WAL write lock. A single serialized connection
+	// keeps BEGIN IMMEDIATE and the write on the same underlying handle.
+	dbA, err := sql.Open("sqlite", dsn(path, 5000))
+	if err != nil {
+		t.Fatalf("open A: %v", err)
+	}
+	defer dbA.Close()
+	dbA.SetMaxOpenConns(1)
+	if _, err := dbA.Exec("BEGIN IMMEDIATE"); err != nil {
+		t.Fatalf("begin A: %v", err)
+	}
+
+	// Connection B uses a zero busy timeout so the contended write fails
+	// immediately with the driver's own SQLITE_BUSY error.
+	dbB, err := sql.Open("sqlite", dsn(path, 0))
+	if err != nil {
+		t.Fatalf("open B: %v", err)
+	}
+	defer dbB.Close()
+	dbB.SetMaxOpenConns(1)
+	_, busyErr := dbB.Exec("CREATE TABLE lock_probe (x INTEGER)")
+	if busyErr == nil {
+		t.Fatal("expected a busy error from the second writer, got nil")
+	}
+
+	// The real driver busy error must classify as a transient lock error.
+	if !isLockError(busyErr) {
+		t.Fatalf("real driver busy error not classified as lock: %v", busyErr)
+	}
+
+	// Feeding the real busy error to corruptOrStore must yield the
+	// retriable store_error code, not store_corrupt.
+	cerr := corruptOrStore(path, busyErr)
+	var se *Error
+	if !errors.As(cerr, &se) {
+		t.Fatalf("corruptOrStore: expected *Error, got %v", cerr)
+	}
+	if se.Code != CodeStore {
+		t.Fatalf("code = %s, want %s (message: %s)", se.Code, CodeStore, se.Message)
 	}
 }
 
