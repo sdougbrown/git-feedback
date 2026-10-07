@@ -152,7 +152,9 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 				// The overall deadline cut the cycle short.
 				return e.timeoutResult(eng, target, account, in, lastAttempt), nil
 			case cycleCut:
-				// The remote hung past the cycle bound: retry on cadence.
+				// The remote hung past the cycle bound: no request succeeded
+				// and no cadence was persisted, so retry on the short
+				// backoff (see wakeTime).
 			case fatalWaitError(rerr):
 				return WaitResult{}, rerr
 			}
@@ -182,7 +184,7 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 			}
 		}
 
-		if serr := e.sleepUntil(ctx, clk, wakeTime(res, rerr, eng)); serr != nil {
+		if serr := e.sleepUntil(ctx, clk, wakeTime(res, rerr, cycleCut, eng)); serr != nil {
 			return e.timeoutResult(eng, target, account, in, lastAttempt), nil
 		}
 	}
@@ -210,11 +212,18 @@ func attemptOf(res Result, eng *Engine, target forge.Target, account string, pre
 // wakeTime computes the next wake instant from one cycle's outcome. Sleeps
 // honor the shared cadence: published, failed, or head-changed cycles sleep
 // until the persisted next_due, deferrals until the gate lifts, and busy
-// until the short retry backoff.
-func wakeTime(res Result, rerr error, eng *Engine) time.Time {
+// until the short retry backoff. A cycle cut by its bound (no request
+// succeeded, no cadence persisted) also wakes on the short retry backoff.
+func wakeTime(res Result, rerr error, cycleCut bool, eng *Engine) time.Time {
 	now := eng.clock().Now()
 	_, _, min := eng.durations()
 	if rerr != nil || res.Status == StatusHeadChange {
+		if cycleCut {
+			// The cycle was cut by its bound before any request succeeded;
+			// no cadence advancement was persisted, so retry on the short
+			// backoff instead of the cadence interval.
+			return now.Add(busyRetryBackoff)
+		}
 		if res.Attempt != nil && res.Attempt.HasNextDue {
 			return res.Attempt.NextDue
 		}

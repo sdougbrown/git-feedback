@@ -696,6 +696,34 @@ func TestInjectedGateNoSplitBrain(t *testing.T) {
 	}
 }
 
+// TestWakeTimeCycleCutShortBackoff: a cycle cut by its bound (the remote
+// hung past the 90s cap) must wake on the short retry backoff, not the
+// cadence interval, because no request succeeded and no cadence
+// advancement was persisted (finalizeFenced fails on the cancelled cycle
+// context, so res.Attempt is nil). A non-cut transient failure with no
+// recorded attempt still wakes on the cadence interval.
+func TestWakeTimeCycleCutShortBackoff(t *testing.T) {
+	e := newEnv(t)
+
+	// Cycle-cut outcome: the reconcile failed with the cycle context's
+	// deadline and no attempt was recorded.
+	now := e.clk.Now()
+	got := wakeTime(Result{}, context.DeadlineExceeded, true, e.eng)
+	want := now.Add(busyRetryBackoff)
+	if !got.Equal(want) {
+		t.Fatalf("wakeTime(cycleCut) = %v, want %v (short backoff, not the 60s cadence)", got, want)
+	}
+
+	// Control: a non-cut transient failure (no recorded attempt) still wakes
+	// on the cadence interval.
+	now2 := e.clk.Now()
+	got2 := wakeTime(Result{}, context.DeadlineExceeded, false, e.eng)
+	_, _, min := e.eng.durations()
+	if !got2.Equal(now2.Add(min)) {
+		t.Fatalf("wakeTime(transient, not cut) = %v, want now+%v (cadence)", got2, min)
+	}
+}
+
 func TestIsStale(t *testing.T) {
 	now := time.Now()
 	min := 60 * time.Second
