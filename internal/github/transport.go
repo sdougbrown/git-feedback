@@ -72,13 +72,29 @@ func NewTransport(apiBase, token string, pacer RequestPacer, gate RateGate, clk 
 	}, nil
 }
 
-// Get performs a read-only GET against path (relative to the API base).
+// Get performs a read-only GET against path (relative to the API base, or
+// an absolute URL on the API host, as returned in a rel="next" Link
+// header). Cross-host absolute URLs are rejected before the request is
+// issued.
 func (t *Transport) Get(ctx context.Context, path string, cond *CacheEntry) (int, http.Header, []byte, forge.RateInfo, bool, error) {
 	extra := map[string]string{}
 	if cond != nil && cond.ETag != "" {
 		extra["If-None-Match"] = cond.ETag
 	}
-	return t.do(ctx, http.MethodGet, t.apiURL.String()+path, "", nil, ResourceREST, extra)
+	u, err := url.Parse(path)
+	if err != nil {
+		return 0, nil, nil, forge.RateInfo{}, false, err
+	}
+	var rawURL string
+	if u.IsAbs() {
+		if u.Host != t.apiURL.Host {
+			return 0, nil, nil, forge.RateInfo{}, false, fmt.Errorf("refusing request to different host %q", u.Host)
+		}
+		rawURL = u.String()
+	} else {
+		rawURL = t.apiURL.String() + path
+	}
+	return t.do(ctx, http.MethodGet, rawURL, "", nil, ResourceREST, extra)
 }
 
 // GraphQL performs a read-only GraphQL POST and returns the raw data along

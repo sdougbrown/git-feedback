@@ -351,6 +351,62 @@ func TestMissingCachedBodyRefetches(t *testing.T) {
 	}
 }
 
+func TestAbsoluteNextLinkSelf(t *testing.T) {
+	// GitHub returns ABSOLUTE rel="next" Link targets. The transport must
+	// follow an absolute next URL that points back at the API host.
+	stub := baseStub(t)
+	standardThreads(t, stub)
+	srv := httptest.NewServer(stub.handler())
+	t.Cleanup(srv.Close)
+	clk := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	adapter := NewAdapter(srv.URL, recordingRunner{token: "tok"}, NewMemoryAdmission(), NewMemoryGate(), NewFixedPacer(clk, time.Second), NewMemoryCache(), clk)
+	sess, err := adapter.Authenticate(context.Background(), "alice")
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	stub.rest["reviews"] = []restPageSpec{{body: "[]"}}
+	stub.rest["comments"] = []restPageSpec{
+		{body: `[{"id":1,"user":{"login":"bob"},"body":"first","created_at":"2024-01-01T00:00:00Z"}]`, link: `<` + srv.URL + `/repos/o/r/issues/7/comments?page=2>; rel="next"`},
+		{body: `[{"id":2,"user":{"login":"eve"},"body":"second","created_at":"2024-01-02T00:00:00Z"}]`},
+	}
+	inv, err := adapter.collect(context.Background(), sess.(*Session).tp, testTarget(t), forge.CollectOptions{})
+	if err != nil {
+		t.Fatalf("collect with an absolute self next link: %v", err)
+	}
+	if len(inv.Snapshot.Comments) != 2 {
+		t.Fatalf("want 2 comments across both pages, got %d", len(inv.Snapshot.Comments))
+	}
+}
+
+func TestAbsoluteNextLinkCrossHost(t *testing.T) {
+	// An absolute rel="next" target pointing at a different host must fail
+	// the attempt rather than yield a smaller inventory.
+	stub := baseStub(t)
+	standardThreads(t, stub)
+	srv := httptest.NewServer(stub.handler())
+	t.Cleanup(srv.Close)
+	clk := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	adapter := NewAdapter(srv.URL, recordingRunner{token: "tok"}, NewMemoryAdmission(), NewMemoryGate(), NewFixedPacer(clk, time.Second), NewMemoryCache(), clk)
+	sess, err := adapter.Authenticate(context.Background(), "alice")
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	stub.rest["reviews"] = []restPageSpec{{body: "[]"}}
+	stub.rest["comments"] = []restPageSpec{
+		{body: `[{"id":1,"user":{"login":"bob"},"body":"first","created_at":"2024-01-01T00:00:00Z"}]`, link: `<https://evil.example/repos/o/r/issues/7/comments?page=2>; rel="next"`},
+	}
+	result, err := adapter.Collect(context.Background(), sess, testTarget(t), forge.CollectOptions{})
+	if err == nil {
+		t.Fatal("an absolute next link to a different host must fail the attempt")
+	}
+	if !strings.Contains(err.Error(), "different host") {
+		t.Fatalf("want the cross-host rejection, got %v", err)
+	}
+	if result.Snapshot != nil || result.Complete {
+		t.Fatal("a failed attempt must not publish a (smaller) inventory")
+	}
+}
+
 func TestConditionalLastPageCached(t *testing.T) {
 	stub := baseStub(t)
 	standardThreads(t, stub)
