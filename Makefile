@@ -33,8 +33,7 @@ registry-test: build test-bin
 		(cd $$HOME/Code/cli-registry && go build -o "$$tmp/cli-registry" ./cmd/cli-registry) || { echo "error: failed to build cli-registry from $$HOME/Code/cli-registry" >&2; rm -rf "$$tmp"; exit 1; }; \
 		CLI_REGISTRY_BIN="$$tmp/cli-registry"; \
 	fi; \
-	if [ -z "$$CLI_REGISTRY_BIN" ]; then echo "error: CLI_REGISTRY_BIN is empty; set it or ensure $$HOME/Code/cli-registry exists" >&2; exit 1; fi; \
-	echo "using CLI_REGISTRY_BIN=$$CLI_REGISTRY_BIN"; \
+		echo "using CLI_REGISTRY_BIN=$$CLI_REGISTRY_BIN"; \
 	CLI_REGISTRY_BIN="$$CLI_REGISTRY_BIN" go test ./integration -run 'TestManifest' -count=1; \
 	status=$$?; \
 	if [ -n "$$tmp" ]; then rm -rf "$$tmp"; fi; \
