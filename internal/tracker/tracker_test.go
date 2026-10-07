@@ -900,3 +900,12 @@ func TestIsStale(t *testing.T) {
 		})
 	}
 }
+
+func TestNewLeaseTokenRandFailure(t *testing.T) {
+	orig := randRead
+	randRead = func([]byte) (int, error) { return 0, errors.New("rand down") }
+	defer func() { randRead = orig }()
+	if _, err := newLeaseToken(); err == nil {
+		t.Fatal("newLeaseToken = no error, want error on rand failure")
+	}
+}

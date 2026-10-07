@@ -171,7 +171,10 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 	}
 	host := forge.CanonicalHost(target.Host)
 	ttl, refresh, min := e.durations()
-	token := newLeaseToken()
+	token, err := newLeaseToken()
+	if err != nil {
+		return Result{}, err
+	}
 
 	var sess forge.Session
 	account := forge.CanonicalAccount(in.Account)

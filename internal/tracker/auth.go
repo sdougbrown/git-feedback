@@ -13,14 +13,18 @@ import (
 	"github.com/sdougbrown/git-feedback/internal/store"
 )
 
-// newLeaseToken returns a fresh 128-bit random hex lease token.
-func newLeaseToken() string {
+// randRead is the entropy source for lease tokens; tests stub it to
+// exercise the failure path.
+var randRead = rand.Read
+
+// newLeaseToken returns a fresh 128-bit random hex lease token. A rand
+// failure is an error: a predictable token would weaken the lease fence.
+func newLeaseToken() (string, error) {
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// The token only needs to be unique among this store's callers.
-		return hex.EncodeToString([]byte(time.Now().String()))[:32]
+	if _, err := randRead(b[:]); err != nil {
+		return "", err
 	}
-	return hex.EncodeToString(b[:])
+	return hex.EncodeToString(b[:]), nil
 }
 
 // isBusy reports whether err is the store's lease-busy error.
