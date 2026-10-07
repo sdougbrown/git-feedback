@@ -249,13 +249,32 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
+// writeResult emits exactly one JSON envelope to w. The fallback is written
+// only when the primary write failed before any bytes reached w; a partial write is reported via stderr and the error return instead.
 func writeResult(w io.Writer, r Result) error {
-	if err := Write(w, r); err != nil {
-		// Encoding the envelope cannot fail; guard anyway.
-		fmt.Fprintln(w, `{"schema":"git-feedback/v1","status":"error","error":{"code":"internal","message":"envelope write failed"}}`)
+	var emitted int64
+	err := Write(&countingWriter{w: w, n: &emitted}, r)
+	if err == nil {
+		return nil
+	}
+	if emitted > 0 {
 		return err
 	}
-	return nil
+	fmt.Fprintln(w, `{"schema":"git-feedback/v1","status":"error","error":{"code":"internal","message":"envelope write failed"}}`)
+	return err
+}
+
+// countingWriter counts bytes delivered to the underlying writer so a
+// failed write can be told apart from a partial one.
+type countingWriter struct {
+	w io.Writer
+	n *int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	*c.n += int64(n)
+	return n, err
 }
 
 // errorResult builds the error envelope for a failure.
