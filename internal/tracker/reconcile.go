@@ -383,6 +383,7 @@ func (e *Engine) publish(ctx context.Context, target forge.Target, host, account
 		ObservedHead:    coll.Snapshot.Head,
 		HasObservedHead: true,
 		Snapshot:        e.currentSnapshot(ctx, target.ID, account),
+		Attempt:         e.latestAttempt(ctx, target.ID, account),
 		Freshness:       e.freshness(ctx, target.ID, account),
 		Session:         sess,
 	}, nil
@@ -403,6 +404,15 @@ func (e *Engine) currentSnapshot(ctx context.Context, targetID, account string) 
 		return nil
 	}
 	return &sum
+}
+
+// latestAttempt returns the stream's latest recorded attempt, or nil.
+func (e *Engine) latestAttempt(ctx context.Context, targetID, account string) *store.Attempt {
+	att, ok, err := e.Store.LatestAttempt(ctx, targetID, account)
+	if err != nil || !ok {
+		return nil
+	}
+	return &att
 }
 
 // freshness computes the freshness inputs for the stream's current snapshot.
@@ -429,6 +439,7 @@ func (e *Engine) deferredResult(ctx context.Context, target forge.Target, accoun
 	if account != "" {
 		res.Account, res.HasAccount = account, true
 		res.Snapshot = e.currentSnapshot(ctx, target.ID, account)
+		res.Attempt = e.latestAttempt(ctx, target.ID, account)
 		res.Freshness = e.freshness(ctx, target.ID, account)
 	}
 	return res
