@@ -44,6 +44,7 @@ Every subcommand writes exactly one JSON value to stdout. Go types live in
 - Event kinds: `initial_observation`, `revision`, `not_observed`, `head_changed`. A feedback object reappearing after `not_observed` gets a new `revision`.
 - Event fields: `id, kind, object_kind, object_id, revision, url, snapshot_id, observed_at, author`; head events also carry `head_before` and `head_after`. `author` is the object's authoring login and appears only when non-empty (author-less and synthetic target events omit it). Counters are per `(stream_id, object_kind, object_id)`, starting at 1 and increasing for every observed occurrence, including disappearance/reappearance.
 - Delivery-time self filter: events whose object author equals the stream's verified account are excluded from `inbox` and `wait` delivery by default; `--exclude-self` opts back in. Author-less and legacy rows (no author) are always delivered, and store/snapshot retention is unchanged — the filter applies only at delivery. Known limitation: a thread revision whose only change is the account's own resolution state carries the thread author (a reviewer), so it is NOT filtered; self-authored content (own comments, own reviews, own replies) is what filters.
+- Author spellings match the REST API exactly: thread and thread-comment authors come from GraphQL, reviews and top-level comments from REST, and GitHub App logins are spelled `name[bot]` on both sides. GraphQL omits the suffix, so it is restored from `author.__typename`. Upgrade note: `author` is part of an object's fingerprint, so the first collection after upgrading emits one `revision` for each bot-authored thread whose stored fingerprint predates this spelling.
 - Event `url` is the object's own URL (thread root comment, review, or comment), falling back to the target's PR URL when the object carries none; target events always carry the PR URL.
 - Event ID is `e<seq>` where `seq` is `INTEGER PRIMARY KEY AUTOINCREMENT` on `events`. IDs are opaque to callers and never content hashes.
 - Initial publication emits a target `initial_observation` containing the head. A subsequent complete stable-head collection emits a target `head_changed` event when the head differs, even with identical feedback. Commit it with the new snapshot so lost output remains replayable. Head drift during collection and pinned-head mismatches instead persist incomplete-attempt metadata; they do not publish mixed-head snapshots.
@@ -57,6 +58,11 @@ Every subcommand writes exactly one JSON value to stdout. Go types live in
 - `inbox --ids-only` renders `events` as an array of plain event ID strings
   instead of full event records; acknowledgement and cursor semantics are
   unchanged.
+- `ack` accepts comma-separated `--event` values and `--events-from -`, which
+  reads IDs from stdin as one ID per line, a JSON array of ID strings, or the
+  full `inbox --ids-only` envelope. A form that yields zero IDs is a usage
+  error. The ack result lists the acknowledged event IDs in `events`. An
+  envelope with `has_more: true` is a usage error: ack a complete page.
 
 ## Integration modes
 

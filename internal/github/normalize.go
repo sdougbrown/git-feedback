@@ -203,6 +203,20 @@ func (a *Adapter) collectComments(ctx context.Context, tp *Transport, t forge.Ta
 	return comments, nil
 }
 
+// authorLogin renders a GraphQL author login the way the REST API spells it:
+// GitHub App accounts (Bot) gain the "[bot]" suffix that REST includes and
+// GraphQL omits, so a GitHub App keeps a distinct author from a same-named
+// user account.
+func authorLogin(a *gqlAuthor) string {
+	if a == nil {
+		return ""
+	}
+	if a.TypeName == "Bot" {
+		return a.Login + "[bot]"
+	}
+	return a.Login
+}
+
 // normalizeThread converts a GraphQL thread node into a forge.Thread. The
 // root comment supplies the thread author and body; the remaining comments
 // are the thread's replies. Resolution state is carried from isResolved.
@@ -211,10 +225,7 @@ func normalizeThread(node gqlThreadNode) (*forge.Thread, error) {
 		return nil, fmt.Errorf("%w: thread %s has no root comment", forge.ErrIncomplete, node.ID)
 	}
 	root := node.Comments.Nodes[0]
-	rootAuthor := ""
-	if root.Author != nil {
-		rootAuthor = root.Author.Login
-	}
+	rootAuthor := authorLogin(root.Author)
 	ft := &forge.Thread{
 		ID:                    node.ID,
 		Author:                rootAuthor,
@@ -236,10 +247,7 @@ func normalizeThread(node gqlThreadNode) (*forge.Thread, error) {
 		ft.ResolutionState = "resolved"
 	}
 	for _, c := range node.Comments.Nodes[1:] {
-		author := ""
-		if c.Author != nil {
-			author = c.Author.Login
-		}
+		author := authorLogin(c.Author)
 		ft.Comments = append(ft.Comments, forge.ThreadComment{
 			ID:                c.ID,
 			DatabaseID:        c.DatabaseID,

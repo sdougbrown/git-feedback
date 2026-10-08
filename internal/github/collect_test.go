@@ -301,6 +301,47 @@ func TestNestedCommentActionFields(t *testing.T) {
 		paged.CommitOID == "" || paged.OriginalCommitOID == "" {
 		t.Fatalf("deep-paginated reply missing fields: %+v", paged)
 	}
+	if paged.Author != "bob[bot]" {
+		t.Fatalf("deep-paginated Bot author should carry the REST [bot] suffix, got %q", paged.Author)
+	}
+}
+
+func TestBotAuthorLoginMatchesREST(t *testing.T) {
+	stub := baseStub(t)
+	stub.graphql["threads"] = []string{fixture(t, "threads_bot.json")}
+	// REST spells the GitHub App with the [bot] suffix it keeps in user.login.
+	stub.rest["reviews"] = []restPageSpec{{body: `[{"id":1,"user":{"login":"umpire-bot[bot]"},"body":"review body","state":"APPROVED","commit_id":"abc"}]`}}
+	stub.rest["comments"] = []restPageSpec{{body: "[]"}}
+	adapter, sess := newCollectEnv(t, stub)
+
+	inv, err := adapter.collect(context.Background(), sess.tp, testTarget(t), forge.CollectOptions{})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	byID := map[string]forge.Thread{}
+	for _, th := range inv.Snapshot.Threads {
+		byID[th.ID] = th
+	}
+	// Bot root author gains the suffix; User reply stays bare.
+	bot := byID["TB1"]
+	if bot.Author != "umpire-bot[bot]" {
+		t.Fatalf("Bot thread author should be umpire-bot[bot], got %q", bot.Author)
+	}
+	if len(bot.Comments) != 1 || bot.Comments[0].Author != "alice" {
+		t.Fatalf("User reply should stay bare, got %+v", bot.Comments)
+	}
+	// User root author stays bare; Bot reply gains the suffix.
+	user := byID["TU1"]
+	if user.Author != "alice" {
+		t.Fatalf("User thread author should stay alice, got %q", user.Author)
+	}
+	if len(user.Comments) != 1 || user.Comments[0].Author != "dep-bot[bot]" {
+		t.Fatalf("Bot reply should be dep-bot[bot], got %+v", user.Comments)
+	}
+	// GraphQL and REST spell the same GitHub App identically.
+	if len(inv.Snapshot.Reviews) != 1 || inv.Snapshot.Reviews[0].Author != bot.Author {
+		t.Fatalf("review author %v should match thread author %q", inv.Snapshot.Reviews, bot.Author)
+	}
 }
 
 func TestEditedOldReview(t *testing.T) {

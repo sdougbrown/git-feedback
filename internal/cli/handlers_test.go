@@ -583,6 +583,311 @@ func TestAckUsageErrors(t *testing.T) {
 	}
 }
 
+// withStdin substitutes the package stdin reader for --events-from -.
+func withStdin(t *testing.T, s string) {
+	t.Helper()
+	prev := stdin
+	stdin = strings.NewReader(s)
+	t.Cleanup(func() { stdin = prev })
+}
+
+// pendingCount returns the stream's stored pending event count.
+func pendingCount(t *testing.T, st *store.Store) int {
+	t.Helper()
+	page, err := st.Inbox(context.Background(), store.InboxInput{
+		TargetID: handlerTarget().ID, Account: "alice", Consumer: "ci", Limit: store.MaxInboxLimit,
+	})
+	if err != nil {
+		t.Fatalf("direct inbox: %v", err)
+	}
+	return len(page.Events)
+}
+
+// assertAckReceipt checks the receipt echoes exactly the acknowledged IDs.
+func assertAckReceipt(t *testing.T, env map[string]any, want ...string) {
+	t.Helper()
+	raw, ok := env["events"].([]any)
+	if !ok || len(raw) != len(want) {
+		t.Fatalf("events = %v, want %v", env["events"], want)
+	}
+	for i, w := range want {
+		if raw[i] != w {
+			t.Errorf("events[%d] = %v, want %q", i, raw[i], w)
+		}
+	}
+}
+
+func TestAckCommaSeparatedIDs(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+
+	code, env, _ := runCLI(t, []string{
+		"ack", "--consumer", "ci", "--event=e1,e2", "--state-dir", dir, handlerURL,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	if env["status"] != "ok" {
+		t.Errorf("status = %v, want ok", env["status"])
+	}
+	assertAckReceipt(t, env, "e1", "e2")
+	if n := pendingCount(t, st); n != 2 {
+		t.Errorf("pending events = %d, want 2 after comma ack", n)
+	}
+}
+
+func TestAckCommaIDsDedupe(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+
+	code, env, _ := runCLI(t, []string{
+		"ack", "--consumer", "ci", "--event=e1,e1", "--event=e1", "--state-dir", dir, handlerURL,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+	}
+	assertAckReceipt(t, env, "e1")
+	if n := pendingCount(t, st); n != 3 {
+		t.Errorf("pending events = %d, want 3 after deduped ack", n)
+	}
+}
+
+func TestAckEventWhitespaceAndEmptySegments(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+
+	// Leading/trailing whitespace and empty segments are dropped; only
+	// the real IDs are acknowledged.
+	code, env, _ := runCLI(t, []string{
+		"ack", "--consumer", "ci", "--event= e1 ,,e2 ", "--state-dir", dir, handlerURL,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	assertAckReceipt(t, env, "e1", "e2")
+	if n := pendingCount(t, st); n != 2 {
+		t.Errorf("pending events = %d, want 2 after whitespace/empty ack", n)
+	}
+}
+
+func TestAckEventsFromStdin(t *testing.T) {
+	t.Run("one id per line", func(t *testing.T) {
+		dir, st, _ := handlerEnv(t)
+		publishHandler(t, st, "alice")
+		withStdin(t, "e1\ne2\n")
+
+		code, env, _ := runCLI(t, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertContract(t, env)
+		assertAckReceipt(t, env, "e1", "e2")
+		if n := pendingCount(t, st); n != 2 {
+			t.Errorf("pending events = %d, want 2 after stdin ack", n)
+		}
+	})
+
+	t.Run("json array", func(t *testing.T) {
+		dir, st, _ := handlerEnv(t)
+		publishHandler(t, st, "alice")
+		withStdin(t, `["e1", "e2"]`)
+
+		code, env, _ := runCLI(t, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertAckReceipt(t, env, "e1", "e2")
+		if n := pendingCount(t, st); n != 2 {
+			t.Errorf("pending events = %d, want 2 after json array ack", n)
+		}
+	})
+
+	t.Run("inbox ids-only envelope", func(t *testing.T) {
+		dir, st, _ := handlerEnv(t)
+		publishHandler(t, st, "alice")
+		// The full --ids-only envelope is consumed directly.
+		_, _, inboxStdout, _ := runCLIStd(t, []string{
+			"inbox", "--consumer", "ci", "--ids-only", "--state-dir", dir, handlerURL,
+		})
+		withStdin(t, inboxStdout)
+
+		code, env, _ := runCLI(t, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertAckReceipt(t, env, "e1", "e2", "e3", "e4")
+		if n := pendingCount(t, st); n != 0 {
+			t.Errorf("pending events = %d, want 0 after envelope ack", n)
+		}
+	})
+
+	t.Run("blank line amid ids", func(t *testing.T) {
+		dir, st, _ := handlerEnv(t)
+		publishHandler(t, st, "alice")
+		withStdin(t, "e1\n\ne2\n")
+
+		code, env, _ := runCLI(t, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertContract(t, env)
+		assertAckReceipt(t, env, "e1", "e2")
+		if n := pendingCount(t, st); n != 2 {
+			t.Errorf("pending events = %d, want 2 after blank-line ack", n)
+		}
+	})
+}
+
+func TestAckEventsFromCombinedWithEventFlag(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+	withStdin(t, "e2\n")
+
+	code, env, _ := runCLI(t, []string{
+		"ack", "--consumer", "ci", "--event=e1", "--events-from", "-", "--state-dir", dir, handlerURL,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	assertAckReceipt(t, env, "e1", "e2")
+	if n := pendingCount(t, st); n != 2 {
+		t.Errorf("pending events = %d, want 2 after combined ack", n)
+	}
+}
+
+func TestAckEventsFromUsageErrors(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+	tests := []struct {
+		name  string
+		stdin string
+		argv  []string
+	}{
+		{"empty stdin", "", []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}},
+		{"blank stdin", "\n  \n", []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}},
+		{"zero-id json array", "[]", []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}},
+		{"not a json array", "[\"e1\", 2]", []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}},
+		{"non-stdin value", "e1\n", []string{
+			"ack", "--consumer", "ci", "--events-from", "file.txt", "--state-dir", dir, handlerURL,
+		}},
+		{"full event-records envelope", `{"events":[{"id":"e1","kind":"revision"},{"id":"e2","kind":"revision"}]}`, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			withStdin(t, tc.stdin)
+			code, env, _ := runCLI(t, tc.argv)
+			if code != 2 {
+				t.Fatalf("exit = %d, want 2 (%v)", code, env["error"])
+			}
+			if env["error"].(map[string]any)["code"] != "usage" {
+				t.Errorf("error = %v, want usage", env["error"])
+			}
+		})
+	}
+}
+
+func TestAckEventsFromTruncatedEnvelope(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+	withStdin(t, `{"events":["e1","e2"],"has_more":true}`)
+
+	code, env, _ := runCLI(t, []string{
+		"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+	})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (%v)", code, env["error"])
+	}
+	if env["error"].(map[string]any)["code"] != "usage" {
+		t.Errorf("error = %v, want usage", env["error"])
+	}
+	// Nothing was acknowledged.
+	if n := pendingCount(t, st); n != 4 {
+		t.Errorf("pending events = %d, want 4 after rejected truncated ack", n)
+	}
+}
+
+func TestAckJSONFormsDropEmptyIDs(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+	withStdin(t, `["e1", ""]`)
+
+	code, env, _ := runCLI(t, []string{
+		"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	// The empty entry is dropped like a blank line, not forwarded to the store.
+	assertAckReceipt(t, env, "e1")
+	if n := pendingCount(t, st); n != 3 {
+		t.Errorf("pending events = %d, want 3 after empty-entry json ack", n)
+	}
+}
+
+func TestAckEventsFromDedupesAgainstEventFlag(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+	// e1 arrives on both --event and stdin; the receipt and the pending
+	// count must reflect one acknowledgement of each ID.
+	withStdin(t, "e1\ne2\n")
+
+	code, env, _ := runCLI(t, []string{
+		"ack", "--consumer", "ci", "--event=e1", "--events-from", "-", "--state-dir", dir, handlerURL,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	assertAckReceipt(t, env, "e1", "e2")
+	if n := pendingCount(t, st); n != 2 {
+		t.Errorf("pending events = %d, want 2 after cross-source dedupe ack", n)
+	}
+}
+
+func TestAckEventFlagWithEmptyStdinIsUsageError(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+	// The explicit stdin form is validated on its own: empty stdin is a
+	// usage error even when --event supplied valid IDs.
+	withStdin(t, "")
+
+	code, env, _ := runCLI(t, []string{
+		"ack", "--consumer", "ci", "--event=e1", "--events-from", "-", "--state-dir", dir, handlerURL,
+	})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (%v)", code, env["error"])
+	}
+	if env["error"].(map[string]any)["code"] != "usage" {
+		t.Errorf("error = %v, want usage", env["error"])
+	}
+	// Nothing was acknowledged, including the valid --event ID.
+	if n := pendingCount(t, st); n != 4 {
+		t.Errorf("pending events = %d, want 4 after rejected empty-stdin ack", n)
+	}
+}
+
 func TestWaitStatusLineOnStderr(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")

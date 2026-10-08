@@ -111,10 +111,11 @@ func TestWaitColdStart(t *testing.T) {
 	}
 }
 
-// TestPinnedWaitDeliversHistoricalBacklog: pending events are returned
-// immediately without remote authentication; the stored observed head and
-// the requested expected head travel with stale set on mismatch.
-func TestPinnedWaitDeliversHistoricalBacklog(t *testing.T) {
+// TestPinnedWaitFailsBeforeBacklogDelivery: a --head that does not match
+// the stored snapshot head fails with the pinned-head mismatch before
+// delivering stored backlog, even when the consumer has pending events.
+// The check is offline: no remote request is made.
+func TestPinnedWaitFailsBeforeBacklogDelivery(t *testing.T) {
 	stub := newStub(t)
 	env := testEnv(fakeGHPath(t), stub.srv.URL, nil)
 	dir := testState(t)
@@ -124,8 +125,8 @@ func TestPinnedWaitDeliversHistoricalBacklog(t *testing.T) {
 	envOut := runOK(t, env, 30*time.Second, waitArgs(dir, "--head", "pinhead", "--timeout", "5s")...)
 	assertNoRequests(t, stub, before)
 
-	if s := statusOf(t, envOut); s != "events" {
-		t.Fatalf("wait status = %q, want events", s)
+	if s := statusOf(t, envOut); s != "head_changed" {
+		t.Fatalf("wait status = %q, want head_changed", s)
 	}
 	if head := stringField(t, envOut, "observed_head"); head != "h1" {
 		t.Fatalf("observed_head = %q, want h1", head)
@@ -136,8 +137,8 @@ func TestPinnedWaitDeliversHistoricalBacklog(t *testing.T) {
 	if !staleField(t, envOut) {
 		t.Fatalf("stale = false, want true when the stored head differs from --head")
 	}
-	if ids := eventIDs(t, envOut); len(ids) == 0 {
-		t.Fatalf("wait delivered no events")
+	if ids := eventIDs(t, envOut); len(ids) != 0 {
+		t.Fatalf("wait delivered %d events, want 0 (backlog must not be delivered on a pin mismatch)", len(ids))
 	}
 }
 
