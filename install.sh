@@ -79,10 +79,6 @@ printf '  downloading %s...\n' "$ASSET"
 curl -fsSL -o "${TMPDIR}/${ASSET}" "$URL" \
   || err "download failed: $URL"
 
-printf '  downloading %s...\n' "$ASSET"
-curl -fsSL -o "${TMPDIR}/${ASSET}" "$URL" \
-  || err "download failed: $URL"
-
 # --- verify checksum -------------------------------------------------------
 
 # The release publishes a checksums.txt (see .goreleaser.yaml); verify the
