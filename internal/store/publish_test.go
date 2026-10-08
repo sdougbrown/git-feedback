@@ -256,6 +256,74 @@ func TestAbsentIsNotResolved(t *testing.T) {
 	}
 }
 
+// TestEventURLsPointAtObjects verifies that feedback events carry the
+// object's own URL, target events keep the PR URL, and objects without a
+// URL (or absent from the inventory) fall back to the PR URL.
+func TestEventURLsPointAtObjects(t *testing.T) {
+	st := openTestStore(t)
+	th := thread("t1", "fix this")
+	th.URL = "https://github.com/owner/name/pull/7#discussion_r1"
+	rv := forge.Review{ID: "r1", URL: "https://github.com/owner/name/pull/7#pullreview-1", Author: "rev", Body: "lgtm-ish", State: "CHANGES_REQUESTED"}
+	cm := forge.Comment{ID: "c1", URL: "https://github.com/owner/name/issues/7#issuecomment-1", Author: "rev", Body: "note"}
+	publish(t, st, "alice", mkSnapshot("headA", []forge.Thread{th}, []forge.Review{rv}, []forge.Comment{cm}))
+	evs := events(t, st, "alice", "c1")
+	byObj := map[string]Event{}
+	for _, e := range evs {
+		byObj[e.ObjectKind+":"+e.ObjectID] = e
+	}
+	if got := byObj["target:"+testTarget().ID].URL; got != testTarget().URL {
+		t.Errorf("target event url = %q, want %q", got, testTarget().URL)
+	}
+	if got := byObj["thread:t1"].URL; got != th.URL {
+		t.Errorf("thread event url = %q, want %q", got, th.URL)
+	}
+	if got := byObj["review:r1"].URL; got != rv.URL {
+		t.Errorf("review event url = %q, want %q", got, rv.URL)
+	}
+	if got := byObj["comment:c1"].URL; got != cm.URL {
+		t.Errorf("comment event url = %q, want %q", got, cm.URL)
+	}
+
+	// A URL-only change must not write a new snapshot: the URLs are
+	// excluded from the fingerprints.
+	res := publish(t, st, "alice", mkSnapshot("headA", []forge.Thread{th},
+		[]forge.Review{{ID: "r1", Author: "rev", Body: "lgtm-ish", State: "CHANGES_REQUESTED"}},
+		[]forge.Comment{{ID: "c1", Author: "rev", Body: "note"}}))
+	if res.Changed {
+		t.Fatalf("URL-only change wrote a new snapshot: %+v", res)
+	}
+
+	// Content change on an object without a URL: the revision event falls
+	// back to the PR URL.
+	publish(t, st, "alice", mkSnapshot("headA", []forge.Thread{th},
+		[]forge.Review{{ID: "r1", Author: "rev", Body: "edited", State: "CHANGES_REQUESTED"}},
+		[]forge.Comment{{ID: "c1", Author: "rev", Body: "note"}}))
+	evs = events(t, st, "alice", "c1")
+	var rev Event
+	for _, e := range evs {
+		if e.Kind == KindRevision && e.ObjectID == "r1" {
+			rev = e
+		}
+	}
+	if rev.URL != testTarget().URL {
+		t.Errorf("URL-less revision event url = %q, want PR URL %q", rev.URL, testTarget().URL)
+	}
+
+	// not_observed: the object is absent from the inventory, its URL is
+	// unknown, and the event falls back to the PR URL.
+	publish(t, st, "alice", mkSnapshot("headA", nil, nil, nil))
+	evs = events(t, st, "alice", "c1")
+	var notObserved Event
+	for _, e := range evs {
+		if e.Kind == KindNotObserved && e.ObjectID == "r1" {
+			notObserved = e
+		}
+	}
+	if notObserved.URL != testTarget().URL {
+		t.Errorf("not_observed event url = %q, want PR URL %q", notObserved.URL, testTarget().URL)
+	}
+}
+
 // TestFenceValidation verifies publish against a valid, stale, and wrong
 // token lease.
 func TestFenceValidation(t *testing.T) {
