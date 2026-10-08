@@ -306,6 +306,24 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 		}
 		return WaitResult{}, false, err
 	}
+	// The pinned head is checked against the stored snapshot head before
+	// any backlog delivery: a mismatch is the same fatal outcome as a
+	// cycle's pinned-head mismatch, so stored events never reach the
+	// caller with expected_head != observed_head.
+	if in.Head != "" && ok && sum.Head != in.Head {
+		return WaitResult{
+			Status:          StatusHeadChange,
+			Target:          target,
+			Account:         account,
+			HasAccount:      true,
+			ObservedHead:    sum.Head,
+			HasObservedHead: sum.Head != "",
+			ExpectedHead:    in.Head,
+			HasExpectedHead: true,
+			Snapshot:        &sum,
+			Freshness:       Freshness{Stale: true},
+		}, true, nil
+	}
 	res := WaitResult{
 		Status:     StatusEvents,
 		Target:     target,
@@ -322,7 +340,8 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 	if in.Head != "" {
 		res.ExpectedHead, res.HasExpectedHead = in.Head, true
 		// Delivered backlog never asserts a fresh read of the pinned tip:
-		// stale records that the stored head differs from the request.
+		// the pin check above already rejected a mismatching stored head,
+		// so stale only records that no stored snapshot verifies the pin.
 		res.Freshness.Stale = res.ObservedHead != in.Head
 	} else {
 		_, _, min := e.durations()
