@@ -653,6 +653,25 @@ func TestAckCommaIDsDedupe(t *testing.T) {
 	}
 }
 
+func TestAckEventWhitespaceAndEmptySegments(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+
+	// Leading/trailing whitespace and empty segments are dropped; only
+	// the real IDs are acknowledged.
+	code, env, _ := runCLI(t, []string{
+		"ack", "--consumer", "ci", "--event= e1 ,,e2 ", "--state-dir", dir, handlerURL,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	assertAckReceipt(t, env, "e1", "e2")
+	if n := pendingCount(t, st); n != 2 {
+		t.Errorf("pending events = %d, want 2 after whitespace/empty ack", n)
+	}
+}
+
 func TestAckEventsFromStdin(t *testing.T) {
 	t.Run("one id per line", func(t *testing.T) {
 		dir, st, _ := handlerEnv(t)
@@ -709,6 +728,24 @@ func TestAckEventsFromStdin(t *testing.T) {
 			t.Errorf("pending events = %d, want 0 after envelope ack", n)
 		}
 	})
+
+	t.Run("blank line amid ids", func(t *testing.T) {
+		dir, st, _ := handlerEnv(t)
+		publishHandler(t, st, "alice")
+		withStdin(t, "e1\n\ne2\n")
+
+		code, env, _ := runCLI(t, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertContract(t, env)
+		assertAckReceipt(t, env, "e1", "e2")
+		if n := pendingCount(t, st); n != 2 {
+			t.Errorf("pending events = %d, want 2 after blank-line ack", n)
+		}
+	})
 }
 
 func TestAckEventsFromCombinedWithEventFlag(t *testing.T) {
@@ -752,6 +789,9 @@ func TestAckEventsFromUsageErrors(t *testing.T) {
 		{"non-stdin value", "e1\n", []string{
 			"ack", "--consumer", "ci", "--events-from", "file.txt", "--state-dir", dir, handlerURL,
 		}},
+		{"full event-records envelope", `{"events":[{"id":"e1","kind":"revision"},{"id":"e2","kind":"revision"}]}`, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -764,6 +804,26 @@ func TestAckEventsFromUsageErrors(t *testing.T) {
 				t.Errorf("error = %v, want usage", env["error"])
 			}
 		})
+	}
+}
+
+func TestAckEventsFromTruncatedEnvelope(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+	withStdin(t, `{"events":["e1","e2"],"has_more":true}`)
+
+	code, env, _ := runCLI(t, []string{
+		"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+	})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (%v)", code, env["error"])
+	}
+	if env["error"].(map[string]any)["code"] != "usage" {
+		t.Errorf("error = %v, want usage", env["error"])
+	}
+	// Nothing was acknowledged.
+	if n := pendingCount(t, st); n != 4 {
+		t.Errorf("pending events = %d, want 4 after rejected truncated ack", n)
 	}
 }
 

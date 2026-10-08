@@ -27,9 +27,6 @@ func handleAck(ctx context.Context, inv Invocation) (Result, error) {
 		return Result{}, err
 	}
 	if len(ids) == 0 {
-		if inv.Flags["events-from"] != "" {
-			return Result{}, &usageError{"ack --events-from - read no event IDs"}
-		}
 		return Result{}, &usageError{"ack requires at least one --event <ID>"}
 	}
 	clk := newClock()
@@ -117,12 +114,23 @@ func readEventIDsFromStdin(r io.Reader) ([]string, error) {
 		}
 	case strings.HasPrefix(trimmed, "{"):
 		var envelope struct {
-			Events []string `json:"events"`
+			Events  []any `json:"events"`
+			HasMore bool  `json:"has_more"`
 		}
 		if err := json.Unmarshal([]byte(trimmed), &envelope); err != nil {
 			return nil, &usageError{fmt.Sprintf("--events-from stdin is not a result envelope: %v", err)}
 		}
-		ids = envelope.Events
+		ids = make([]string, 0, len(envelope.Events))
+		for _, e := range envelope.Events {
+			s, ok := e.(string)
+			if !ok {
+				return nil, &usageError{"ack --events-from - received event records, not ID strings; rerun inbox with --ids-only"}
+			}
+			ids = append(ids, s)
+		}
+		if envelope.HasMore {
+			return nil, &usageError{"ack --events-from - received a truncated inbox page (has_more: true); rerun inbox with --limit 200 or page with --after"}
+		}
 	default:
 		ids = make([]string, 0)
 		for _, line := range strings.Split(trimmed, "\n") {
