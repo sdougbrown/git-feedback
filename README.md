@@ -11,6 +11,18 @@ resolved, fixes are correct, or a reviewer has finished.
 
 ## Install
 
+Install the latest release binary (no Go toolchain required):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sdougbrown/git-feedback/main/install.sh | bash
+```
+
+The script detects your platform, downloads the release archive from GitHub
+Releases, and installs to `~/.local/bin` (override with `BINDIR=/path bash
+install.sh`).
+
+Or install from source:
+
 ```sh
 make install
 ```
