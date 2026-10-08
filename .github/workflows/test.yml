@@ -1,0 +1,23 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      # make verify is the project's own definition of green: fmtcheck, vet,
+      # unit + integration tests (integration builds both binaries first),
+      # the testhooks-tagged CLI suite, and the race variants.
+      - name: make verify
+        run: make verify
