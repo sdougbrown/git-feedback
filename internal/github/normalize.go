@@ -214,12 +214,21 @@ func normalizeThread(node gqlThreadNode) (*forge.Thread, error) {
 		rootAuthor = root.Author.Login
 	}
 	ft := &forge.Thread{
-		ID:              node.ID,
-		Author:          rootAuthor,
-		Body:            root.Body,
-		Path:            node.Path,
-		IsOutdated:      node.IsOutdated,
-		ResolutionState: "unresolved",
+		ID:                    node.ID,
+		Author:                rootAuthor,
+		Body:                  root.Body,
+		Path:                  node.Path,
+		IsOutdated:            node.IsOutdated,
+		ResolutionState:       "unresolved",
+		Line:                  node.Line,
+		OriginalLine:          node.OriginalLine,
+		StartLine:             node.StartLine,
+		OriginalStartLine:     node.OriginalStartLine,
+		RootCommentID:         root.ID,
+		RootCommentDatabaseID: root.DatabaseID,
+		URL:                   root.URL,
+		CommitOID:             root.Commit.oid(),
+		OriginalCommitOID:     root.OriginalCommit.oid(),
 	}
 	if node.IsResolved {
 		ft.ResolutionState = "resolved"
@@ -230,10 +239,14 @@ func normalizeThread(node gqlThreadNode) (*forge.Thread, error) {
 			author = c.Author.Login
 		}
 		ft.Comments = append(ft.Comments, forge.ThreadComment{
-			ID:        c.ID,
-			Author:    author,
-			Body:      c.Body,
-			CreatedAt: c.CreatedAt,
+			ID:                c.ID,
+			DatabaseID:        c.DatabaseID,
+			URL:               c.URL,
+			Author:            author,
+			Body:              c.Body,
+			CommitOID:         c.Commit.oid(),
+			OriginalCommitOID: c.OriginalCommit.oid(),
+			CreatedAt:         c.CreatedAt,
 		})
 	}
 	return ft, nil

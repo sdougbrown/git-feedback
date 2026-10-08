@@ -32,21 +32,33 @@ type gqlPageInfo struct {
 	EndCursor   *string `json:"endCursor"`
 }
 
+type gqlCommit struct {
+	OID string `json:"oid"`
+}
+
 type gqlCommentNode struct {
-	ID        string    `json:"id"`
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"createdAt"`
-	Author    *struct {
+	ID             string     `json:"id"`
+	DatabaseID     int64      `json:"databaseId"`
+	Body           string     `json:"body"`
+	URL            string     `json:"url"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	Commit         *gqlCommit `json:"commit"`
+	OriginalCommit *gqlCommit `json:"originalCommit"`
+	Author         *struct {
 		Login string `json:"login"`
 	} `json:"author"`
 }
 
 type gqlThreadNode struct {
-	ID         string `json:"id"`
-	IsOutdated bool   `json:"isOutdated"`
-	IsResolved bool   `json:"isResolved"`
-	Path       string `json:"path"`
-	Comments   struct {
+	ID                string `json:"id"`
+	IsOutdated        bool   `json:"isOutdated"`
+	IsResolved        bool   `json:"isResolved"`
+	Path              string `json:"path"`
+	Line              *int   `json:"line"`
+	OriginalLine      *int   `json:"originalLine"`
+	StartLine         *int   `json:"startLine"`
+	OriginalStartLine *int   `json:"originalStartLine"`
+	Comments          struct {
 		TotalCount int              `json:"totalCount"`
 		PageInfo   gqlPageInfo      `json:"pageInfo"`
 		Nodes      []gqlCommentNode `json:"nodes"`
@@ -83,8 +95,8 @@ const threadsQuery = `query($owner:String!,$name:String!,$number:Int!,$cursor:St
       reviewThreads(first:100,after:$cursor){
         totalCount
         pageInfo{hasNextPage endCursor}
-        nodes{id isOutdated isResolved path
-          comments(first:100){totalCount pageInfo{hasNextPage endCursor} nodes{id body createdAt author{login}}}
+        nodes{id isOutdated isResolved path line originalLine startLine originalStartLine
+          comments(first:100){totalCount pageInfo{hasNextPage endCursor} nodes{id databaseId body url createdAt commit{oid} originalCommit{oid} author{login}}}
         }
       }
     }
@@ -95,7 +107,7 @@ const threadsQuery = `query($owner:String!,$name:String!,$number:Int!,$cursor:St
 const threadCommentsQuery = `query($id:ID!,$cursor:String){
   node(id:$id){
     ... on PullRequestReviewThread{
-      comments(first:100,after:$cursor){totalCount pageInfo{hasNextPage endCursor} nodes{id body createdAt author{login}}}
+      comments(first:100,after:$cursor){totalCount pageInfo{hasNextPage endCursor} nodes{id databaseId body url createdAt commit{oid} originalCommit{oid} author{login}}}
     }
   }
   rateLimit{remaining limit resetAt}
@@ -112,4 +124,12 @@ func (a *Adapter) recordGQLRateLimit(rl *gqlRateLimit) error {
 		return &forge.ErrRateLimited{Resource: ResourceGraphQL, Until: rl.ResetAt}
 	}
 	return nil
+}
+
+// oid returns the commit SHA, or "" when GitHub returns a null commit.
+func (c *gqlCommit) oid() string {
+	if c == nil {
+		return ""
+	}
+	return c.OID
 }

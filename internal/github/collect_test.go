@@ -231,6 +231,78 @@ func TestNestedCommentPagination(t *testing.T) {
 	}
 }
 
+func TestThreadActionFields(t *testing.T) {
+	stub := baseStub(t)
+	standardThreads(t, stub)
+	standardREST(stub)
+	adapter, sess := newCollectEnv(t, stub)
+
+	inv, err := adapter.collect(context.Background(), sess.tp, testTarget(t), forge.CollectOptions{})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	byID := map[string]forge.Thread{}
+	for _, th := range inv.Snapshot.Threads {
+		byID[th.ID] = th
+	}
+
+	live := byID["T1"]
+	if live.Line == nil || *live.Line != 11 || live.OriginalLine == nil || *live.OriginalLine != 11 {
+		t.Fatalf("T1 line fields wrong: %v %v", live.Line, live.OriginalLine)
+	}
+	if live.StartLine != nil || live.OriginalStartLine != nil {
+		t.Fatalf("T1 start lines should be nil: %v %v", live.StartLine, live.OriginalStartLine)
+	}
+	if live.RootCommentID != "C100" || live.RootCommentDatabaseID != 5100 ||
+		live.URL != "https://github.com/o/r/pull/1#discussion_r5100" {
+		t.Fatalf("T1 root comment identifiers wrong: %+v", live)
+	}
+	if live.CommitOID != "c000000000000000000000000000000000000001" ||
+		live.OriginalCommitOID != "a000000000000000000000000000000000000001" {
+		t.Fatalf("T1 commit OIDs wrong: %q %q", live.CommitOID, live.OriginalCommitOID)
+	}
+	reply := live.Comments[0]
+	if reply.ID != "C101" || reply.DatabaseID != 5101 || reply.URL != "https://github.com/o/r/pull/1#discussion_r5101" ||
+		reply.CommitOID != live.CommitOID || reply.OriginalCommitOID != live.OriginalCommitOID {
+		t.Fatalf("T1 reply fields wrong: %+v", reply)
+	}
+
+	// Outdated threads carry no current line and no current commit.
+	outdated := byID["T0"]
+	if outdated.Line != nil || outdated.StartLine != nil {
+		t.Fatalf("T0 current lines should be nil: %v %v", outdated.Line, outdated.StartLine)
+	}
+	if outdated.OriginalLine == nil || *outdated.OriginalLine != 10 || outdated.OriginalStartLine == nil || *outdated.OriginalStartLine != 8 {
+		t.Fatalf("T0 original lines wrong: %v %v", outdated.OriginalLine, outdated.OriginalStartLine)
+	}
+	if outdated.CommitOID != "" || outdated.OriginalCommitOID == "" ||
+		outdated.Comments[0].CommitOID != "" || outdated.Comments[0].OriginalCommitOID == "" {
+		t.Fatalf("T0 commit OIDs wrong: %+v", outdated)
+	}
+}
+
+func TestNestedCommentActionFields(t *testing.T) {
+	stub := baseStub(t)
+	stub.graphql["threads"] = []string{fixture(t, "thread_deep_p1.json")}
+	stub.graphql["nested"] = []string{fixture(t, "thread_deep_p2.json")}
+	standardREST(stub)
+	adapter, sess := newCollectEnv(t, stub)
+
+	inv, err := adapter.collect(context.Background(), sess.tp, testTarget(t), forge.CollectOptions{})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	th := inv.Snapshot.Threads[0]
+	if th.RootCommentDatabaseID != 5700 {
+		t.Fatalf("root database id %d", th.RootCommentDatabaseID)
+	}
+	paged := th.Comments[100]
+	if paged.ID != "C801" || paged.DatabaseID != 5801 || paged.URL == "" ||
+		paged.CommitOID == "" || paged.OriginalCommitOID == "" {
+		t.Fatalf("deep-paginated reply missing fields: %+v", paged)
+	}
+}
+
 func TestEditedOldReview(t *testing.T) {
 	stub := baseStub(t)
 	standardThreads(t, stub)
