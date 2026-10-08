@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -71,7 +72,20 @@ func TestExportSnapshot(t *testing.T) {
 	if err := json.Unmarshal(b, &doc); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if doc.Schema != "git-feedback-snapshot/v1" {
+	// The file pins snake_case keys: the forge structs carry json tags and
+	// the schema is bumped to v2. Assert the raw keys so a tag regression or
+	// schema revert fails here, not at a consumer.
+	for _, key := range []string{"resolution_state", "root_comment_database_id", "is_outdated", "commit_oid", "collected_start", "collected_end"} {
+		if !bytes.Contains(b, []byte("\""+key+"\"")) {
+			t.Errorf("export file missing snake_case key %q", key)
+		}
+	}
+	for _, key := range []string{"ResolutionState", "RootCommentDatabaseID", "IsOutdated", "CollectedStart"} {
+		if bytes.Contains(b, []byte("\""+key+"\"")) {
+			t.Errorf("export file contains PascalCase key %q", key)
+		}
+	}
+	if doc.Schema != "git-feedback-snapshot/v2" {
 		t.Errorf("schema = %q", doc.Schema)
 	}
 	if doc.Target.ID != testTarget().ID || doc.Account != "alice" || doc.Head != "headA" {
