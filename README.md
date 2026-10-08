@@ -21,14 +21,24 @@ The script detects your platform, downloads the release archive from GitHub
 Releases, and installs to `~/.local/bin` (override with `BINDIR=/path bash
 install.sh`).
 
-Or install from source:
+Or build from source (requires Go 1.26 or later):
 
 ```sh
-make install
+git clone https://github.com/sdougbrown/git-feedback
+cd git-feedback
+make build
+mkdir -p ~/.local/bin
+ln -sf "$(pwd)/bin/git-feedback" ~/.local/bin/git-feedback
 ```
 
-This runs `go install ./cmd/git-feedback` and places `git-feedback` on your Go
-`bin` directory. Ensure that directory is on `PATH`.
+`make build` writes the binary to `./bin/git-feedback`. The symlink exposes both
+`git-feedback` and `git feedback` on `PATH`, so Git resolves the subcommand
+form. Verify with `git-feedback --help`.
+
+If you keep the clone in place, pull and rebuild with `git pull && make build`
+to update the binary. `make install` is an alternative that runs
+`go install ./cmd/git-feedback` and places `git-feedback` on your Go `bin`
+directory — ensure that directory is on `PATH`.
 
 ## Invocation
 
