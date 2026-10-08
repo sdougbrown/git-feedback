@@ -91,53 +91,51 @@ JSON result on events or deadline. The receiving harness calls `ack` separately.
 
 ### Monitor loop idiom
 
-Operating a monitor mode loop in practice surfaces rules that the envelope
-alone does not capture. These are conventions for harness authors, not tool
-behavior.
+Monitor mode has rules of its own that the envelope does not capture. They
+are conventions for harness authors, not tool behavior.
 
 - **Detect edges, not levels.** A level-based probe ("pending > 0 → act")
-  fires once and then dedupes identical output, so a second round of findings
-  never pings. Poll a cheap read — for example `inbox --consumer canary --json
-  | jq '.events | length'` — and act on a *change* in the value, or run `wait`
-  and treat each returned batch as its own edge.
+  fires once and then dedupes identical output, so a second round of
+  findings never pings. Poll a cheap read and act on a change in the value,
+  or run `wait` and treat each returned batch as its own edge. Prefer
+  `wait`: the batch carries the delivered events, not just a signal.
 - **Use a dedicated canary consumer for the watcher.** Its unacknowledged
-  count then stays independent of the orchestrator's paging state, and the raw
-  edge detector never loses events to the orchestrator's acknowledgements.
-- **Ack after handling to reset the baseline.** Acknowledgement is a delivery
-  receipt, not a triage disposition; once the delivered events are handled,
-  the pending count returns to its baseline and the next change is a clean
-  edge.
-- **Never ack in the same breath as delivery.** The ack must be traceable to
-  a handling step that actually read the batch. An automated wrapper that
-  acks immediately decouples delivery from handling: the pending count
-  resets, nothing signals unhandled content, and reviewer activity becomes
+  count stays independent of the orchestrator's paging state. The raw edge
+  detector never loses events to the orchestrator's acknowledgements.
+- **Ack after handling to reset the baseline.** Acknowledgement is a
+  delivery receipt, not a triage disposition. Once the delivered events are
+  handled, the pending count returns to baseline and the next change is a
+  clean edge.
+- **Never ack in the same breath as delivery.** The ack must be traceable
+  to a handling step that reads the batch. An automated wrapper that acks
+  immediately decouples delivery from handling. The pending count resets,
+  nothing signals unhandled content, and reviewer activity becomes
   invisible behind a clean baseline. If the acking process is not the
-  triaging process, the delivered events must be surfaced somewhere the
-  triager sees them — a ping, a queue — not a log file.
+  triaging process, surface the delivered events where the triager sees
+  them. A ping or a queue works; never only a log file.
 - **Treat a ping as "inventory changed", never "a reviewer spoke".** The
-  orchestrator's own actions — replies, re-resolutions, summary comments —
-  generate events too. v1 does not classify own-actions; the
-  ack-after-handling baseline is what keeps self-noise from compounding.
-- **Do not run ad-hoc reconciles while the monitor holds the edge.** A manual
-  reconcile between polls can consume the change the watcher was about to
-  report. If polling is needed, use `wait` (or a reconcile schedule that is
-  self-gating) rather than out-of-band refreshes.
+  orchestrator generates events through replies, re-resolutions, and
+  summary comments. v1 does not classify own-actions, so the
+  ack-after-handling baseline keeps self-noise from compounding.
+- **Do not run ad-hoc reconciles while the monitor holds the edge.** A
+  manual reconcile between polls consumes the change the watcher was about
+  to report. If polling is needed, poll through `wait` rather than
+  out-of-band refreshes. The reconcile engine is self-gating, so the
+  cadence stays rate-safe.
 - **An inbox-only watcher is blind.** The local store never refreshes by
   itself; a watcher that only polls `inbox` sees nothing new. Poll with
-  `reconcile`/`wait` so collection happens on the watch cadence — reconcile is
-  self-gating (deferred when not due), so polling is rate-safe.
+  `reconcile`/`wait` so collection happens on the watch cadence. Reconcile
+  is self-gating (deferred when not due), so polling is rate-safe.
 - **`reviewer_completion` stays `"unknown"`; completion is a convention.**
   Whether a reviewer is done is an agreement between the reviewer and the
-  monitor (for example a reaction on a serviced review request), not tool
-  state. The tool deliberately stays out of it.
-- **The watcher lives until the last request is serviced.** Standing the
-  monitor down while a review request is still pending is how rounds get
-  missed. Keep the loop armed until the pending request is consumed or the
-  work merges.
+  monitor, not tool state. The tool deliberately stays out of it.
+- **Do not stand down while a request is outstanding.** The review that
+  services a pending request can arrive at any time. A loop that stops when
+  the round count looks converged will miss it.
 
-`examples/watch-loop.sh` is a minimal wrapper that removes the most common
-manual step: it runs `wait`, acknowledges the delivered event IDs, and
-respawns, so a harness cannot forget the respawn.
+`examples/watch-loop.sh` closes the respawn gap and surfaces the batch: it
+runs `wait`, prints each delivered envelope to stdout, acknowledges the
+delivered events, and respawns.
 
 ### Why `wait` is not registered
 
