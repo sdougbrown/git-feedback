@@ -88,7 +88,7 @@ printf '  verifying checksum...\n'
 curl -fsSL -o "${TMPDIR}/checksums.txt" \
   "https://github.com/${OWNER}/${REPO}/releases/download/${TAG}/checksums.txt" \
   || err "download failed: checksums.txt"
-expected="$(grep " ${ASSET}$" "${TMPDIR}/checksums.txt" | head -1 | awk '{print $1}')"
+expected="$(grep " ${ASSET}$" "${TMPDIR}/checksums.txt" | head -1 | awk '{print $1}' || true)"
 [ -n "$expected" ] || err "no checksum published for ${ASSET}"
 if command -v sha256sum >/dev/null 2>&1; then
   actual="$(sha256sum "${TMPDIR}/${ASSET}" | awk '{print $1}')"
