@@ -411,7 +411,7 @@ func (e *Engine) freshness(ctx context.Context, targetID, account string) Freshn
 	if err != nil || !ok {
 		return Freshness{}
 	}
-	_, min, _ := e.durations()
+	_, _, min := e.durations()
 	return Freshness{
 		SnapshotObservedAt: sum.ObservedAt,
 		Stale:              IsStale(sum.ObservedAt, e.Clock.Now(), min),
