@@ -14,21 +14,37 @@ const (
 
 // ThreadComment is one nested reply inside a review thread.
 type ThreadComment struct {
-	ID        string
-	Author    string
-	Body      string
-	CreatedAt time.Time
+	ID                string
+	DatabaseID        int64
+	URL               string
+	Author            string
+	Body              string
+	CommitOID         string
+	OriginalCommitOID string
+	CreatedAt         time.Time
 }
 
 // Thread is a review thread with its nested comments and resolution state.
+// RootCommentDatabaseID is the REST id of the root comment, the target of
+// pulls/N/comments/{id}/replies. Line fields are nil when GitHub reports no
+// position, as for outdated threads.
 type Thread struct {
-	ID              string
-	Author          string
-	Body            string
-	Path            string
-	IsOutdated      bool
-	ResolutionState string
-	Comments        []ThreadComment
+	ID                    string
+	Author                string
+	Body                  string
+	Path                  string
+	Line                  *int
+	OriginalLine          *int
+	StartLine             *int
+	OriginalStartLine     *int
+	RootCommentID         string
+	RootCommentDatabaseID int64
+	URL                   string
+	CommitOID             string
+	OriginalCommitOID     string
+	IsOutdated            bool
+	ResolutionState       string
+	Comments              []ThreadComment
 }
 
 // Review is a submitted review. CommitID is informational only: an edited
