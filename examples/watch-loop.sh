@@ -14,9 +14,10 @@
 # acknowledges nothing; the harness records delivery by calling `ack` with the
 # delivered event IDs. Doing that by hand leaves a gap: acking without
 # respawning stalls the loop until the next external trigger. This wrapper
-# closes it — each iteration runs one bounded `wait`, acknowledges what it
-# delivered, and loops. `status: "timeout"` is a normal outcome and simply
-# starts the next iteration.
+# closes it — each iteration runs one bounded `wait`, prints the delivered
+# envelope to stdout (the acking side must surface the batch), acknowledges
+# the delivered event IDs, and loops. `status: "timeout"` is a normal
+# outcome and simply starts the next iteration.
 #
 # Requires: git-feedback on PATH, jq.
 set -euo pipefail
@@ -95,6 +96,9 @@ while true; do
   status=$(printf '%s' "$out" | jq -r '.status')
 
   if [ "$status" = "events" ]; then
+    # Surface the delivered batch before acknowledging: the wrapper is the
+    # acking side, so the batch must be visible to the harness.
+    printf '%s\n' "$out"
     # shellcheck disable=SC2207
     ids=($(printf '%s' "$out" | jq -r '.events[]?.id'))
     if [ "${#ids[@]}" -gt 0 ]; then

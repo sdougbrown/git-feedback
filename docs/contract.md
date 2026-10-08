@@ -133,8 +133,9 @@ are conventions for harness authors, not tool behavior.
   services a pending request can arrive at any time. A loop that stops when
   the round count looks converged will miss it.
 
-`examples/watch-loop.sh` closes the respawn gap. It runs `wait`,
-acknowledges the delivered events, and respawns.
+`examples/watch-loop.sh` closes the respawn gap and surfaces the batch: it
+runs `wait`, prints each delivered envelope to stdout, acknowledges the
+delivered events, and respawns.
 
 ### Why `wait` is not registered
 
