@@ -583,6 +583,38 @@ func TestAckUsageErrors(t *testing.T) {
 	}
 }
 
+func TestWaitStatusLineOnStderrTimeout(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+
+	// Drain the backlog so wait has nothing to deliver and runs out the
+	// deadline against the persisted (not-yet-due) schedule.
+	ids := []string{"e1", "e2", "e3", "e4"}
+	argv := []string{"ack", "--consumer", "ci", "--state-dir", dir}
+	for _, id := range ids {
+		argv = append(argv, "--event="+id)
+	}
+	argv = append(argv, handlerURL)
+	code, env, _ := runCLI(t, argv)
+	if code != 0 {
+		t.Fatalf("ack: exit = %d (%v)", code, env["error"])
+	}
+
+	code, env, _, stderr := runCLIStd(t, []string{
+		"wait", "--timeout", "2s", "--consumer", "ci", "--state-dir", dir, handlerURL,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d (%v)", code, env["error"])
+	}
+	if env["status"] != "timeout" {
+		t.Fatalf("status = %v, want timeout", env["status"])
+	}
+	want := "git-feedback wait: status=timeout events=0 has_more=false\n"
+	if !strings.Contains(stderr, want) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, want)
+	}
+}
+
 func TestWaitStatusLineOnStderr(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")
