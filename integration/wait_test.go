@@ -1,8 +1,10 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -430,5 +432,36 @@ func TestWaitExcludeSelf(t *testing.T) {
 	}
 	if len(authors) != 3 {
 		t.Fatalf("events = %d, want 3 (target + own + rev)", len(authors))
+	}
+}
+
+// TestWaitStatusLineTimeout: the stderr status summary reflects the timeout
+// outcome without parsing the envelope. The backlog is drained first so the
+// wait runs out the deadline against the persisted schedule; the fake gh and
+// local stub keep the cycle hermetic.
+func TestWaitStatusLineTimeout(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, nil)
+	dir := testState(t)
+	seedPublished(t, env, dir)
+	ackAll(t, env, dir)
+
+	_, tagged := binPaths(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	res := runCLI(ctx, t, tagged, env, waitArgs(dir, "--timeout", "5s")...)
+	if res.Code != 0 {
+		t.Fatalf("exit = %d (stderr %q)", res.Code, res.Stderr)
+	}
+	var envOut map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(res.Stdout), &envOut); err != nil {
+		t.Fatalf("decode envelope: %v (%q)", err, res.Stdout)
+	}
+	if s := statusOf(t, envOut); s != "timeout" {
+		t.Fatalf("wait status = %q, want timeout", s)
+	}
+	want := "git-feedback wait: status=timeout events=0 has_more=false\n"
+	if !strings.Contains(res.Stderr, want) {
+		t.Errorf("stderr = %q, want it to contain %q", res.Stderr, want)
 	}
 }
