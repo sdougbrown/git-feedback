@@ -369,6 +369,10 @@ func (s *Store) emitEvents(ctx context.Context, tx *sql.Tx, streamID int64, in P
 	for _, k := range []string{string(forge.KindThread), string(forge.KindReview), string(forge.KindComment)} {
 		present[k] = map[string]bool{}
 	}
+	threadByID := make(map[string]forge.Thread, len(snap.Threads))
+	for _, t := range snap.Threads {
+		threadByID[t.ID] = t
+	}
 
 	// Feedback objects in the new inventory, in deterministic order.
 	for _, o := range collectObjects(snap) {
@@ -401,7 +405,7 @@ func (s *Store) emitEvents(ctx context.Context, tx *sql.Tx, streamID int64, in P
 			if err := insertEvent(ctx, tx, streamID, eventInsert{
 				kind: KindRevision, objectKind: string(o.kind), objectID: o.id,
 				revision: rev, url: eventURL(o, in.Target.URL), snapshotID: snapID, observedAt: now,
-				author: o.author,
+				author: revisionAuthor(ctx, tx, streamID, snapID, o, threadByID[o.id], forge.CanonicalAccount(in.Account)),
 			}); err != nil {
 				return err
 			}
@@ -414,7 +418,7 @@ func (s *Store) emitEvents(ctx context.Context, tx *sql.Tx, streamID int64, in P
 			if err := insertEvent(ctx, tx, streamID, eventInsert{
 				kind: KindRevision, objectKind: string(o.kind), objectID: o.id,
 				revision: rev, url: eventURL(o, in.Target.URL), snapshotID: snapID, observedAt: now,
-				author: o.author,
+				author: revisionAuthor(ctx, tx, streamID, snapID, o, threadByID[o.id], forge.CanonicalAccount(in.Account)),
 			}); err != nil {
 				return err
 			}
@@ -480,6 +484,90 @@ func eventURL(o objectState, fallback string) string {
 		return o.url
 	}
 	return fallback
+}
+
+// revisionAuthor attributes a revision event to the authors of what changed.
+// For threads, an all-self changed-comment set — every added or changed
+// comment authored by the stream's own account, no comment removed, and the
+// thread root (author, body, path) unchanged, so a resolution-state-only
+// change also qualifies — is attributed to the account, letting the delivery
+// filter apply to self-authored replies. Everything else keeps the root
+// author: other kinds, mixed or reviewer-authored changes, removals, and any
+// uncertainty (missing prior snapshot, thread absent from every retained
+// snapshot, corrupt body, read error). Delivering extra noise is acceptable;
+// hiding reviewer activity is not.
+func revisionAuthor(ctx context.Context, tx *sql.Tx, streamID, beforeSeq int64, o objectState, cur forge.Thread, account string) string {
+	if o.kind != forge.KindThread {
+		return o.author
+	}
+	prior, ok, err := findPriorThread(ctx, tx, streamID, beforeSeq, o.id)
+	if err != nil || !ok {
+		return o.author
+	}
+	if prior.Author != cur.Author || prior.Body != cur.Body || prior.Path != cur.Path {
+		return o.author
+	}
+	authors, removed := threadCommentChanges(prior.Comments, cur.Comments)
+	if removed || len(authors) == 0 {
+		return o.author
+	}
+	for _, a := range authors {
+		if forge.CanonicalAccount(a) != account {
+			return o.author
+		}
+	}
+	return account
+}
+
+// findPriorThread returns the thread with the given ID as it appeared in the
+// most recent retained snapshot before beforeSeq, walking back past any
+// snapshots that lack it (a reappearance after not_observed). A corrupt body
+// stops the walk as an uncertainty, reported as not found.
+func findPriorThread(ctx context.Context, tx *sql.Tx, streamID, beforeSeq int64, threadID string) (forge.Thread, bool, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT body FROM snapshots WHERE stream_id = ? AND id < ? ORDER BY id DESC`,
+		streamID, beforeSeq)
+	if err != nil {
+		return forge.Thread{}, false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var body string
+		if err := rows.Scan(&body); err != nil {
+			return forge.Thread{}, false, err
+		}
+		var snap forge.Snapshot
+		if err := json.Unmarshal([]byte(body), &snap); err != nil {
+			return forge.Thread{}, false, nil
+		}
+		for _, t := range snap.Threads {
+			if t.ID == threadID {
+				return t, true, rows.Err()
+			}
+		}
+	}
+	return forge.Thread{}, false, rows.Err()
+}
+
+// threadCommentChanges diffs a thread's comments against their prior state
+// by ID, comparing the fingerprint-relevant fields (author and body). It
+// returns the authors of added and changed comments and whether any prior
+// comment was removed.
+func threadCommentChanges(prior, cur []forge.ThreadComment) (authors []string, removed bool) {
+	prev := make(map[string]forge.ThreadComment, len(prior))
+	for _, c := range prior {
+		prev[c.ID] = c
+	}
+	for _, c := range cur {
+		if p, ok := prev[c.ID]; ok {
+			delete(prev, c.ID)
+			if p.Author == c.Author && p.Body == c.Body {
+				continue
+			}
+		}
+		authors = append(authors, c.Author)
+	}
+	return authors, len(prev) > 0
 }
 
 // SnapshotSummary describes a stream's current snapshot for result

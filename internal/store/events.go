@@ -37,7 +37,11 @@ type Event struct {
 	HeadAfter  string
 	// Author is the object's authoring login (the stream's own account is
 	// filtered from delivery by default). Empty for synthetic target events
-	// and legacy rows, which are always deliverable.
+	// and legacy rows, which are always deliverable. Thread revisions are
+	// attributed to the authors of what changed: when every added or changed
+	// comment is self-authored and only the resolution state changed
+	// otherwise, the author is the stream account, so the filter also
+	// applies to self replies.
 	Author string
 }
 
