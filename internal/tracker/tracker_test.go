@@ -909,3 +909,20 @@ func TestNewLeaseTokenRandFailure(t *testing.T) {
 		t.Fatal("newLeaseToken = no error, want error on rand failure")
 	}
 }
+
+// TestFreshnessStaleUsesMinInterval: a snapshot goes stale after the
+// collection interval, not the shorter lease refresh interval.
+func TestFreshnessStaleUsesMinInterval(t *testing.T) {
+	e := newEnv(t)
+	if res := e.reconcile(ReconcileInput{URL: testURL}); res.Status != StatusUpdated {
+		t.Fatalf("status = %s, want updated", res.Status)
+	}
+	e.clk.Advance(30 * time.Second)
+	if f := e.eng.freshness(context.Background(), testTargetID, "alice"); f.Stale {
+		t.Fatalf("stale at +30s, want fresh: %+v", f)
+	}
+	e.clk.Advance(31 * time.Second)
+	if f := e.eng.freshness(context.Background(), testTargetID, "alice"); !f.Stale {
+		t.Fatalf("not stale at +61s, want stale: %+v", f)
+	}
+}

@@ -326,3 +326,62 @@ func TestWaitDeliversEventsAppendedByOwnCycle(t *testing.T) {
 		t.Fatal("wait delivered no events")
 	}
 }
+
+// TestWaitHeadPinCheckedBeforeBacklogDelivery: a wait whose --head does not
+// match the stored snapshot head must fail with the pinned-head mismatch
+// before delivering stored backlog, even when the consumer has pending
+// events. The pin is checked against the stored head, so no cycle (and no
+// remote request) is needed to surface the mismatch.
+func TestWaitHeadPinCheckedBeforeBacklogDelivery(t *testing.T) {
+	e := newEnvAt(t, baseTime)
+	publishBacklog(t, e) // stored head h1, pending events for the consumer
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := runWait(t, e, WaitInput{URL: testURL, Consumer: "watcher", Head: "deadbeef"}, ctx, 5*time.Second)
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if res.Status != StatusHeadChange {
+		t.Fatalf("wait status = %s, want head_changed (the pin must be checked before backlog delivery)", res.Status)
+	}
+	if res.ObservedHead != "h1" || res.ExpectedHead != "deadbeef" {
+		t.Fatalf("heads = %s/%s, want h1/deadbeef", res.ObservedHead, res.ExpectedHead)
+	}
+	if len(res.Events) != 0 {
+		t.Fatalf("events = %d, want 0 (backlog must not be delivered on a pin mismatch)", len(res.Events))
+	}
+	if res.Snapshot == nil {
+		t.Fatal("mismatch result must carry the stored snapshot")
+	}
+	if n := e.stub.count("head"); n != 0 {
+		t.Fatalf("head reads = %d, want 0 (no cycle ran before the pin check)", n)
+	}
+	if n := e.stub.count("verify"); n != 0 {
+		t.Fatalf("verify requests = %d, want 0 (no cycle ran before the pin check)", n)
+	}
+}
+
+// TestWaitHeadPinMatchesStoredBacklog: a wait whose --head matches the
+// stored snapshot head delivers the backlog exactly as before the pin
+// check existed.
+func TestWaitHeadPinMatchesStoredBacklog(t *testing.T) {
+	e := newEnvAt(t, baseTime)
+	publishBacklog(t, e) // stored head h1, pending events for the consumer
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := runWait(t, e, WaitInput{URL: testURL, Consumer: "watcher", Head: "h1"}, ctx, 5*time.Second)
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if res.Status != StatusEvents {
+		t.Fatalf("wait status = %s, want events (matching pin must deliver the backlog)", res.Status)
+	}
+	if len(res.Events) == 0 {
+		t.Fatal("wait delivered no events")
+	}
+	if res.ObservedHead != "h1" || res.ExpectedHead != "h1" {
+		t.Fatalf("heads = %s/%s, want h1/h1", res.ObservedHead, res.ExpectedHead)
+	}
+}
