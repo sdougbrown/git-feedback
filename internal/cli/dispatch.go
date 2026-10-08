@@ -251,7 +251,7 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 	// One-line status summary on the diagnostics channel: monitor commands
 	// point at `wait` and read the outcome from the process output without
 	// parsing the envelope.
-	if inv.Command == "wait" && result.Error == nil &&
+	if inv.Command == "wait" &&
 		(result.Status == StatusEvents || result.Status == StatusTimeout) {
 		fmt.Fprintf(stderr, "git-feedback wait: status=%s events=%d has_more=%t\n",
 			result.Status, len(result.Events), result.HasMore)
