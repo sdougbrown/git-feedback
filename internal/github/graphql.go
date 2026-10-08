@@ -36,6 +36,13 @@ type gqlCommit struct {
 	OID string `json:"oid"`
 }
 
+// gqlAuthor is a GraphQL actor reference. REST spells GitHub App logins with
+// a "[bot]" suffix; GraphQL omits it, so __typename drives the suffix.
+type gqlAuthor struct {
+	TypeName string `json:"__typename"`
+	Login    string `json:"login"`
+}
+
 type gqlCommentNode struct {
 	ID             string     `json:"id"`
 	DatabaseID     int64      `json:"databaseId"`
@@ -44,9 +51,7 @@ type gqlCommentNode struct {
 	CreatedAt      time.Time  `json:"createdAt"`
 	Commit         *gqlCommit `json:"commit"`
 	OriginalCommit *gqlCommit `json:"originalCommit"`
-	Author         *struct {
-		Login string `json:"login"`
-	} `json:"author"`
+	Author         *gqlAuthor `json:"author"`
 }
 
 type gqlThreadNode struct {
@@ -96,7 +101,7 @@ const threadsQuery = `query($owner:String!,$name:String!,$number:Int!,$cursor:St
         totalCount
         pageInfo{hasNextPage endCursor}
         nodes{id isOutdated isResolved path line originalLine startLine originalStartLine
-          comments(first:100){totalCount pageInfo{hasNextPage endCursor} nodes{id databaseId body url createdAt commit{oid} originalCommit{oid} author{login}}}
+          comments(first:100){totalCount pageInfo{hasNextPage endCursor} nodes{id databaseId body url createdAt commit{oid} originalCommit{oid} author{__typename login}}}
         }
       }
     }
@@ -107,7 +112,7 @@ const threadsQuery = `query($owner:String!,$name:String!,$number:Int!,$cursor:St
 const threadCommentsQuery = `query($id:ID!,$cursor:String){
   node(id:$id){
     ... on PullRequestReviewThread{
-      comments(first:100,after:$cursor){totalCount pageInfo{hasNextPage endCursor} nodes{id databaseId body url createdAt commit{oid} originalCommit{oid} author{login}}}
+      comments(first:100,after:$cursor){totalCount pageInfo{hasNextPage endCursor} nodes{id databaseId body url createdAt commit{oid} originalCommit{oid} author{__typename login}}}
     }
   }
   rateLimit{remaining limit resetAt}
