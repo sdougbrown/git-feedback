@@ -35,6 +35,15 @@ case "$ARCH" in
   *) err "unsupported architecture: $ARCH" ;;
 esac
 
+# Rosetta 2: uname -m reports x86_64 when the shell runs under emulation,
+# so an Apple Silicon user would get the amd64 build. Prefer native arm64.
+if [ "$OS" = "darwin" ] && [ "$ARCH" = "amd64" ]; then
+  if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ] \
+    || [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then
+    ARCH="arm64"
+  fi
+fi
+
 info "platform: ${OS}/${ARCH}"
 
 # --- resolve latest release tag -------------------------------------------
