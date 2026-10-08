@@ -143,6 +143,16 @@ func TestChangedResolvedThread(t *testing.T) {
 	if got := eventKinds(evs); !equal(got, want) {
 		t.Fatalf("events = %v, want %v", got, want)
 	}
+	// A resolution-state-only change reaches revisionAuthor's no-changed-
+	// comments branch: the event keeps the root author and stays deliverable,
+	// since the payload does not say who resolved the thread.
+	rev := revisionEvent(t, st, "t1")
+	if rev.Author != "reviewer" {
+		t.Fatalf("revision author = %q, want the root author (reviewer)", rev.Author)
+	}
+	if !deliveredUnderExclude(t, st, "t1") {
+		t.Error("resolution-only revision filtered under ExcludeAuthor, want delivered")
+	}
 }
 
 // TestUnchangedIdempotence verifies that an unchanged complete collection
