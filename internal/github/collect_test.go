@@ -376,6 +376,49 @@ func TestEditedOldReview(t *testing.T) {
 	}
 }
 
+func TestReviewAndCommentURLs(t *testing.T) {
+	stub := baseStub(t)
+	stub.graphql["threads"] = []string{gqlThreadsBody(500)}
+	// Two collects: the first REST page carries html_url, the second is the
+	// same objects with the URLs stripped. The fingerprints must be
+	// identical, proving the URLs stay out of the fingerprints.
+	stub.rest["reviews"] = []restPageSpec{
+		{body: `[{"id":1,"user":{"login":"carol"},"body":"looks good","state":"APPROVED","commit_id":"aaaa","html_url":"https://github.com/o/r/pull/1#pullreview-1"}]`},
+		{body: `[{"id":1,"user":{"login":"carol"},"body":"looks good","state":"APPROVED","commit_id":"aaaa"}]`},
+	}
+	stub.rest["comments"] = []restPageSpec{
+		{body: `[{"id":1,"user":{"login":"bob"},"body":"a note","created_at":"2024-01-01T00:00:00Z","html_url":"https://github.com/o/r/issues/1#issuecomment-1"}]`},
+		{body: `[{"id":1,"user":{"login":"bob"},"body":"a note","created_at":"2024-01-01T00:00:00Z"}]`},
+	}
+	adapter, sess := newCollectEnv(t, stub)
+
+	inv1, err := adapter.collect(context.Background(), sess.tp, testTarget(t), forge.CollectOptions{})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if got := inv1.Snapshot.Reviews[0].URL; got != "https://github.com/o/r/pull/1#pullreview-1" {
+		t.Fatalf("review URL = %q", got)
+	}
+	if got := inv1.Snapshot.Comments[0].URL; got != "https://github.com/o/r/issues/1#issuecomment-1" {
+		t.Fatalf("comment URL = %q", got)
+	}
+	inv2, err := adapter.collect(context.Background(), sess.tp, testTarget(t), forge.CollectOptions{})
+	if err != nil {
+		t.Fatalf("second collect: %v", err)
+	}
+	if inv2.Snapshot.Reviews[0].URL != "" || inv2.Snapshot.Comments[0].URL != "" {
+		t.Fatalf("URLs should be empty when html_url is absent: review=%q comment=%q", inv2.Snapshot.Reviews[0].URL, inv2.Snapshot.Comments[0].URL)
+	}
+	if len(inv1.Objects) != len(inv2.Objects) {
+		t.Fatalf("object count changed: %d → %d", len(inv1.Objects), len(inv2.Objects))
+	}
+	for i := range inv1.Objects {
+		if inv1.Objects[i].Fingerprint != inv2.Objects[i].Fingerprint {
+			t.Fatalf("fingerprint not stable with/without URL for %s: %s != %s", inv1.Objects[i].ProviderID, inv1.Objects[i].Fingerprint, inv2.Objects[i].Fingerprint)
+		}
+	}
+}
+
 func TestRepeatedNestedCursorFails(t *testing.T) {
 	// The nested comments page repeats its endCursor with non-empty nodes
 	// and hasNextPage true. Without a seen-cursor guard this loops

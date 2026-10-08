@@ -18,6 +18,7 @@ type restReview struct {
 	Body     string `json:"body"`
 	State    string `json:"state"`
 	CommitID string `json:"commit_id"`
+	HTMLURL  string `json:"html_url"`
 	User     *struct {
 		Login string `json:"login"`
 	} `json:"user"`
@@ -28,6 +29,7 @@ type restComment struct {
 	ID        int       `json:"id"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
+	HTMLURL   string    `json:"html_url"`
 	User      *struct {
 		Login string `json:"login"`
 	} `json:"user"`
@@ -269,6 +271,7 @@ func normalizeReview(rv restReview) (*forge.Review, error) {
 	}
 	return &forge.Review{
 		ID:       strconv.Itoa(rv.ID),
+		URL:      rv.HTMLURL,
 		Author:   author,
 		Body:     rv.Body,
 		State:    rv.State,
@@ -284,6 +287,7 @@ func normalizeComment(cm restComment) (*forge.Comment, error) {
 	}
 	return &forge.Comment{
 		ID:        strconv.Itoa(cm.ID),
+		URL:       cm.HTMLURL,
 		Author:    author,
 		Body:      cm.Body,
 		CreatedAt: cm.CreatedAt,

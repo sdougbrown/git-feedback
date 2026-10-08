@@ -38,12 +38,14 @@ type PublishResult struct {
 }
 
 // objectState is one object's observed state for fingerprinting, identity,
-// and delivery filtering.
+// and delivery filtering. url is the object's own URL for event delivery;
+// it is empty for objects absent from the inventory.
 type objectState struct {
 	kind        forge.Kind
 	id          string
 	fingerprint string
 	author      string
+	url         string
 }
 
 // sha256hex hashes s and returns the lowercase hex digest.
@@ -67,13 +69,13 @@ func collectObjects(snap forge.Snapshot) []objectState {
 	// author is canonicalized at this choke point so the delivery filter's
 	// comparison against the canonical account is case-insensitive.
 	for _, t := range threads {
-		objs = append(objs, objectState{forge.KindThread, t.ID, forge.FingerprintThread(t), forge.CanonicalAccount(t.Author)})
+		objs = append(objs, objectState{kind: forge.KindThread, id: t.ID, fingerprint: forge.FingerprintThread(t), author: forge.CanonicalAccount(t.Author), url: t.URL})
 	}
 	for _, r := range reviews {
-		objs = append(objs, objectState{forge.KindReview, r.ID, forge.FingerprintReview(r), forge.CanonicalAccount(r.Author)})
+		objs = append(objs, objectState{kind: forge.KindReview, id: r.ID, fingerprint: forge.FingerprintReview(r), author: forge.CanonicalAccount(r.Author), url: r.URL})
 	}
 	for _, c := range comments {
-		objs = append(objs, objectState{forge.KindComment, c.ID, forge.FingerprintComment(c), forge.CanonicalAccount(c.Author)})
+		objs = append(objs, objectState{kind: forge.KindComment, id: c.ID, fingerprint: forge.FingerprintComment(c), author: forge.CanonicalAccount(c.Author), url: c.URL})
 	}
 	return objs
 }
@@ -383,7 +385,7 @@ func (s *Store) emitEvents(ctx context.Context, tx *sql.Tx, streamID int64, in P
 			}
 			if err := insertEvent(ctx, tx, streamID, eventInsert{
 				kind: KindInitialObservation, objectKind: string(o.kind), objectID: o.id,
-				revision: rev, url: in.Target.URL, snapshotID: snapID, observedAt: now,
+				revision: rev, url: eventURL(o, in.Target.URL), snapshotID: snapID, observedAt: now,
 				author: o.author,
 			}); err != nil {
 				return err
@@ -398,7 +400,7 @@ func (s *Store) emitEvents(ctx context.Context, tx *sql.Tx, streamID int64, in P
 			}
 			if err := insertEvent(ctx, tx, streamID, eventInsert{
 				kind: KindRevision, objectKind: string(o.kind), objectID: o.id,
-				revision: rev, url: in.Target.URL, snapshotID: snapID, observedAt: now,
+				revision: rev, url: eventURL(o, in.Target.URL), snapshotID: snapID, observedAt: now,
 				author: o.author,
 			}); err != nil {
 				return err
@@ -411,7 +413,7 @@ func (s *Store) emitEvents(ctx context.Context, tx *sql.Tx, streamID int64, in P
 			}
 			if err := insertEvent(ctx, tx, streamID, eventInsert{
 				kind: KindRevision, objectKind: string(o.kind), objectID: o.id,
-				revision: rev, url: in.Target.URL, snapshotID: snapID, observedAt: now,
+				revision: rev, url: eventURL(o, in.Target.URL), snapshotID: snapID, observedAt: now,
 				author: o.author,
 			}); err != nil {
 				return err
@@ -461,13 +463,23 @@ func (s *Store) emitEvents(ctx context.Context, tx *sql.Tx, streamID int64, in P
 		}
 		if err := insertEvent(ctx, tx, streamID, eventInsert{
 			kind: KindNotObserved, objectKind: string(o.kind), objectID: o.id,
-			revision: rev, url: in.Target.URL, snapshotID: snapID, observedAt: now,
+			revision: rev, url: eventURL(o, in.Target.URL), snapshotID: snapID, observedAt: now,
 			author: o.author,
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// eventURL returns the object's own URL for event delivery, falling back to
+// the target URL when the object carries no URL (the REST payload lacked
+// html_url, or the object is absent from the inventory).
+func eventURL(o objectState, fallback string) string {
+	if o.url != "" {
+		return o.url
+	}
+	return fallback
 }
 
 // SnapshotSummary describes a stream's current snapshot for result

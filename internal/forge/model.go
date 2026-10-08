@@ -52,6 +52,7 @@ type Thread struct {
 // proof the body was evaluated against that commit.
 type Review struct {
 	ID       string
+	URL      string
 	Author   string
 	Body     string
 	State    string
@@ -61,6 +62,7 @@ type Review struct {
 // Comment is a top-level pull request comment.
 type Comment struct {
 	ID        string
+	URL       string
 	Author    string
 	Body      string
 	CreatedAt time.Time
