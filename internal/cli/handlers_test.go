@@ -827,6 +827,67 @@ func TestAckEventsFromTruncatedEnvelope(t *testing.T) {
 	}
 }
 
+func TestAckJSONFormsDropEmptyIDs(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+	withStdin(t, `["e1", ""]`)
+
+	code, env, _ := runCLI(t, []string{
+		"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	// The empty entry is dropped like a blank line, not forwarded to the store.
+	assertAckReceipt(t, env, "e1")
+	if n := pendingCount(t, st); n != 3 {
+		t.Errorf("pending events = %d, want 3 after empty-entry json ack", n)
+	}
+}
+
+func TestAckEventsFromDedupesAgainstEventFlag(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+	// e1 arrives on both --event and stdin; the receipt and the pending
+	// count must reflect one acknowledgement of each ID.
+	withStdin(t, "e1\ne2\n")
+
+	code, env, _ := runCLI(t, []string{
+		"ack", "--consumer", "ci", "--event=e1", "--events-from", "-", "--state-dir", dir, handlerURL,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	assertAckReceipt(t, env, "e1", "e2")
+	if n := pendingCount(t, st); n != 2 {
+		t.Errorf("pending events = %d, want 2 after cross-source dedupe ack", n)
+	}
+}
+
+func TestAckEventFlagWithEmptyStdinIsUsageError(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+	// The explicit stdin form is validated on its own: empty stdin is a
+	// usage error even when --event supplied valid IDs.
+	withStdin(t, "")
+
+	code, env, _ := runCLI(t, []string{
+		"ack", "--consumer", "ci", "--event=e1", "--events-from", "-", "--state-dir", dir, handlerURL,
+	})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (%v)", code, env["error"])
+	}
+	if env["error"].(map[string]any)["code"] != "usage" {
+		t.Errorf("error = %v, want usage", env["error"])
+	}
+	// Nothing was acknowledged, including the valid --event ID.
+	if n := pendingCount(t, st); n != 4 {
+		t.Errorf("pending events = %d, want 4 after rejected empty-stdin ack", n)
+	}
+}
+
 func TestWaitStatusLineOnStderr(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")

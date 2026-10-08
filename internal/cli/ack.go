@@ -140,6 +140,16 @@ func readEventIDsFromStdin(r io.Reader) ([]string, error) {
 			}
 		}
 	}
+	// The JSON forms skip no whitespace of their own, so empty and
+	// whitespace-only entries are dropped here exactly as the line and
+	// comma forms drop them.
+	kept := ids[:0]
+	for _, id := range ids {
+		if strings.TrimSpace(id) != "" {
+			kept = append(kept, id)
+		}
+	}
+	ids = kept
 	if len(ids) == 0 {
 		return nil, &usageError{"--events-from - read no event IDs from stdin"}
 	}
