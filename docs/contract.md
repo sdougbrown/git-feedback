@@ -84,6 +84,9 @@ JSON result on events or deadline. The receiving harness calls `ack` separately.
 - The monitor invokes `wait` with a `--timeout` deadline. `wait` owns the
   polling loop, reusing the shared reconciliation engine and its persisted
   schedule, cadence, and rate gates.
+- `wait` writes a one-line status summary to stderr — for example
+  `git-feedback wait: status=events events=12 has_more=false` — so a monitor
+  command can surface the outcome without parsing the envelope.
 - `wait` returns a single JSON result: `status: "events"` with the pending
   events, or `status: "timeout"` when the deadline elapses.
 - After the harness receives the result, it calls `ack` separately with the event

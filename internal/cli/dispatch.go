@@ -248,6 +248,14 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err.Error())
 		return ExitOperational
 	}
+	// One-line status summary on the diagnostics channel: monitor commands
+	// point at `wait` and read the outcome from the process output without
+	// parsing the envelope.
+	if inv.Command == "wait" &&
+		(result.Status == StatusEvents || result.Status == StatusTimeout) {
+		fmt.Fprintf(stderr, "git-feedback wait: status=%s events=%d has_more=%t\n",
+			result.Status, len(result.Events), result.HasMore)
+	}
 	// A signal that arrived during the envelope write still wins on exit
 	// code, even though the envelope may already be written.
 	select {

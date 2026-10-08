@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,12 +94,18 @@ func publishMixedHandler(t *testing.T, st *store.Store, account string) {
 // runCLI runs one invocation and decodes the envelope.
 func runCLI(t *testing.T, argv []string) (code int, env map[string]any, stdout string) {
 	t.Helper()
-	var out bytes.Buffer
-	code = Run(argv, &out, &bytes.Buffer{})
+	code, env, stdout, _ = runCLIStd(t, argv)
+	return code, env, stdout
+}
+
+func runCLIStd(t *testing.T, argv []string) (code int, env map[string]any, stdout, stderr string) {
+	t.Helper()
+	var out, errBuf bytes.Buffer
+	code = Run(argv, &out, &errBuf)
 	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
 		t.Fatalf("stdout is not one JSON value: %v (%q)", err, out.String())
 	}
-	return code, env, out.String()
+	return code, env, out.String(), errBuf.String()
 }
 
 // assertContract asserts the envelope carries every contract field.
@@ -573,5 +580,24 @@ func TestAckUsageErrors(t *testing.T) {
 				t.Errorf("error = %v, want usage", env["error"])
 			}
 		})
+	}
+}
+
+func TestWaitStatusLineOnStderr(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+
+	code, env, _, stderr := runCLIStd(t, []string{
+		"wait", "--timeout", "5s", "--consumer", "ci", "--state-dir", dir, handlerURL,
+	})
+	if code != 0 {
+		t.Fatalf("exit = %d (%v)", code, env["error"])
+	}
+	if env["status"] != "events" {
+		t.Fatalf("status = %v, want events", env["status"])
+	}
+	want := "git-feedback wait: status=events events=4 has_more=false\n"
+	if !strings.Contains(stderr, want) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, want)
 	}
 }
