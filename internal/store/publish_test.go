@@ -471,6 +471,27 @@ func TestReviewerReplyDelivered(t *testing.T) {
 	}
 }
 
+// TestRootEditWithSelfReplyDelivered verifies that a thread root edit in
+// the same window as a self-authored reply keeps the root author: the
+// reviewer's edited root body is reviewer activity the filter must not hide.
+func TestRootEditWithSelfReplyDelivered(t *testing.T) {
+	st := openTestStore(t)
+	publish(t, st, "alice", mkSnapshot("headA",
+		[]forge.Thread{thread("t1", "fix this")}, nil, nil))
+	edited := thread("t1", "fixed", forge.ThreadComment{ID: "tc1", Author: "alice", Body: "done", CreatedAt: baseTime})
+	publish(t, st, "alice", mkSnapshot("headA", []forge.Thread{edited}, nil, nil))
+	rev := revisionEvent(t, st, "t1")
+	if rev.Author != "reviewer" {
+		t.Fatalf("revision author = %q, want the root author (reviewer) even with an all-self comment change", rev.Author)
+	}
+	if !deliveredUnderExclude(t, st, "t1") {
+		t.Error("root-edit revision filtered under ExcludeAuthor, want delivered")
+	}
+	if a := storedObjectAuthor(t, st, string(forge.KindThread), "t1"); a != "reviewer" {
+		t.Fatalf("objects.author = %q, want the root author (reviewer)", a)
+	}
+}
+
 // TestRemovedCommentDelivered verifies that a window in which a comment was
 // removed keeps the root author and is delivered: removals are never
 // attributable to the account.
