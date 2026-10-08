@@ -71,10 +71,10 @@ func TestInboxSkipEmptyReviews(t *testing.T) {
 	// 2. Flag on: empty COMMENTED review events are skipped, including a
 	// whitespace-only body; decision states and content reviews deliver.
 	filtered := read(InboxInput{TargetID: testTarget().ID, Account: "alice", Consumer: "c1", Limit: MaxInboxLimit, SkipEmptyReviews: true})
-	// Skipped: r1 initial (empty at headA), r2 initial + revision (whitespace
-	// only at both heads), r5 initial. Delivered: target, t1, r3 initial,
-	// r4 initial, head_changed, r1 revision (non-empty at headB), r3
-	// not_observed = 7.
+	// Skipped: r1 initial (empty at headA), r2 initial (whitespace body,
+	// unchanged across heads so no revision event exists), r5 initial.
+	// Delivered: target, t1, r3 initial, r4 initial, head_changed, r1
+	// revision (non-empty at headB), r3 not_observed = 7.
 	if len(filtered.Events) != 7 {
 		t.Fatalf("filtered events = %v, want 7", ids(filtered.Events))
 	}
