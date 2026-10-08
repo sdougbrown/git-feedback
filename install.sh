@@ -40,8 +40,11 @@ info "platform: ${OS}/${ARCH}"
 # --- resolve latest release tag -------------------------------------------
 
 printf '  resolving latest release...\n'
-TAG="$(curl -fsSL "https://api.github.com/repos/${OWNER}/${REPO}/releases/latest" \
-  | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
+payload="$(curl -fsSL "https://api.github.com/repos/${OWNER}/${REPO}/releases/latest")" \
+  || err "could not fetch the latest release"
+# Match the key explicitly so the leftmost match wins regardless of whether
+# the API response is pretty-printed or minified single-line JSON.
+TAG="$(printf '%s' "$payload" | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"([^"]+)"$/\1/' || true)"
 
 if [ -z "$TAG" ]; then
   err "could not determine latest release tag"
@@ -51,7 +54,7 @@ info "latest release: ${TAG}"
 
 # --- download archive -----------------------------------------------------
 
-# goreleaser archive naming: git-feedback_Darwin_arm64.tar.gz, git-feedback_Linux_amd64.tar.gz
+# goreleaser archive naming: git-feedback_darwin_arm64.tar.gz, git-feedback_linux_amd64.tar.gz
 ASSET="git-feedback_${OS}_${ARCH}.tar.gz"
 URL="https://github.com/${OWNER}/${REPO}/releases/download/${TAG}/${ASSET}"
 
