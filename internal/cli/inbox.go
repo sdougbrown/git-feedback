@@ -40,12 +40,13 @@ func handleInbox(ctx context.Context, inv Invocation) (Result, error) {
 		excludeAuthor = account
 	}
 	page, err := st.Inbox(ctx, store.InboxInput{
-		TargetID:      t.ID,
-		Account:       account,
-		Consumer:      consumer,
-		Cursor:        inv.Flags["after"],
-		Limit:         limit,
-		ExcludeAuthor: excludeAuthor,
+		TargetID:         t.ID,
+		Account:          account,
+		Consumer:         consumer,
+		Cursor:           inv.Flags["after"],
+		Limit:            limit,
+		ExcludeAuthor:    excludeAuthor,
+		SkipEmptyReviews: inv.Bools["skip-empty-reviews"],
 	})
 	if err != nil {
 		return Result{}, mapStoreError(err)

@@ -56,9 +56,9 @@ intercepts `git feedback --help` before it reaches the tool).
 ```
 git-feedback reconcile <URL> [--head <SHA>] [--account <LOGIN>] [--state-dir <DIR>] [--json]
 git-feedback snapshot <URL> --snapshot <ID> --output <FILE> [--account <LOGIN>] [--state-dir <DIR>] [--json]
-git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--exclude-self] [--json]
+git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--exclude-self] [--skip-empty-reviews] [--json]
 git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--events-from -] [--account <LOGIN>] [--state-dir <DIR>] [--json]
-git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--json]
+git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--skip-empty-reviews] [--json]
 ```
 
 Every subcommand writes exactly one JSON envelope to stdout (see
@@ -125,6 +125,16 @@ snapshot retention are unchanged — the filter applies only at delivery. A thre
 revision whose only change is the account's own resolution state carries the
 thread author (a reviewer), so it is not filtered; self-authored content is what
 filters.
+
+GitHub creates an empty `COMMENTED` review as a container for each inline reply.
+By default those containers are delivered as content-free `review` events. Pass
+`--skip-empty-reviews` to `inbox` or `wait` to skip them: a review is skipped
+when its state is `COMMENTED` and its body is empty or whitespace-only, as
+recorded in the event's snapshot. Reviews with decision states (`APPROVED`,
+`CHANGES_REQUESTED`, `DISMISSED`) and review `not_observed` events always
+deliver. The filter applies only at delivery — the store, snapshots, and event
+rows are unchanged, and skipped events stay pending in the store, so a page
+sequence run without the flag still delivers them.
 
 ## Explicit acknowledgement
 
