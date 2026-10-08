@@ -61,6 +61,11 @@ fi
 
 info "latest release: ${TAG}"
 
+# The tag is interpolated into download URLs; constrain it to a semver-ish
+# release tag so a tampered API response cannot alter the request path.
+printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$' \
+  || err "unexpected tag format: $TAG"
+
 # --- download archive -----------------------------------------------------
 
 # goreleaser archive naming: git-feedback_darwin_arm64.tar.gz, git-feedback_linux_amd64.tar.gz
@@ -73,6 +78,30 @@ trap 'rm -rf "$TMPDIR"' EXIT
 printf '  downloading %s...\n' "$ASSET"
 curl -fsSL -o "${TMPDIR}/${ASSET}" "$URL" \
   || err "download failed: $URL"
+
+printf '  downloading %s...\n' "$ASSET"
+curl -fsSL -o "${TMPDIR}/${ASSET}" "$URL" \
+  || err "download failed: $URL"
+
+# --- verify checksum -------------------------------------------------------
+
+# The release publishes a checksums.txt (see .goreleaser.yaml); verify the
+# archive against it before extraction so a corrupted or tampered download
+# fails closed.
+printf '  verifying checksum...\n'
+curl -fsSL -o "${TMPDIR}/checksums.txt" \
+  "https://github.com/${OWNER}/${REPO}/releases/download/${TAG}/checksums.txt" \
+  || err "download failed: checksums.txt"
+expected="$(grep " ${ASSET}$" "${TMPDIR}/checksums.txt" | head -1 | awk '{print $1}')"
+[ -n "$expected" ] || err "no checksum published for ${ASSET}"
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "${TMPDIR}/${ASSET}" | awk '{print $1}')"
+elif command -v shasum >/dev/null 2>&1; then
+  actual="$(shasum -a 256 "${TMPDIR}/${ASSET}" | awk '{print $1}')"
+else
+  err "no sha256 utility available (need sha256sum or shasum)"
+fi
+[ "$actual" = "$expected" ] || err "checksum mismatch for ${ASSET}"
 
 # --- extract & install ----------------------------------------------------
 
