@@ -107,6 +107,13 @@ behavior.
   receipt, not a triage disposition; once the delivered events are handled,
   the pending count returns to its baseline and the next change is a clean
   edge.
+- **Never ack in the same breath as delivery.** The ack must be traceable to
+  a handling step that actually read the batch. An automated wrapper that
+  acks immediately decouples delivery from handling: the pending count
+  resets, nothing signals unhandled content, and reviewer activity becomes
+  invisible behind a clean baseline. If the acking process is not the
+  triaging process, the delivered events must be surfaced somewhere the
+  triager sees them — a ping, a queue — not a log file.
 - **Treat a ping as "inventory changed", never "a reviewer spoke".** The
   orchestrator's own actions — replies, re-resolutions, summary comments —
   generate events too. v1 does not classify own-actions; the
