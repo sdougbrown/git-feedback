@@ -132,7 +132,10 @@ correct, or a reviewer has finished.
 last attempt in `attempt`. It returns immediately on fatal errors (auth, not
 found, account mismatch, unsupported host, or a pinned-head mismatch). SIGINT
 exits 130 and SIGTERM exits 143, with no stdout and no acknowledgements. There is
-no resident service; stopping the waiting process stops network work.
+no resident service; stopping the waiting process stops network work. When `wait`
+delivers or times out, it also writes a one-line status summary to stderr — for
+example `git-feedback wait: status=events events=12 has_more=false` — so a monitor
+command can show the outcome without parsing the envelope.
 
 ## Read-only guarantees
 
