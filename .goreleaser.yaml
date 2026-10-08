@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: git-feedback
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: git-feedback
+    binary: git-feedback
+    main: ./cmd/git-feedback
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    # e.g. git-feedback_darwin_arm64.tar.gz — install.sh depends on this
+    # exact lowercase naming.
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  disable: true
+
+release:
+  draft: false
+  prerelease: false
