@@ -86,7 +86,7 @@ var specs = map[string]commandSpec{
 		handle: handleInbox,
 	},
 	"ack": {
-		flags:  []flagSpec{{"consumer", flagString}, {"event", flagRepeat}},
+		flags:  []flagSpec{{"consumer", flagString}, {"event", flagRepeat}, {"events-from", flagString}},
 		handle: handleAck,
 	},
 	"wait": {

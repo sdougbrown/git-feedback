@@ -57,6 +57,11 @@ Every subcommand writes exactly one JSON value to stdout. Go types live in
 - `inbox --ids-only` renders `events` as an array of plain event ID strings
   instead of full event records; acknowledgement and cursor semantics are
   unchanged.
+- `ack` accepts comma-separated `--event` values and `--events-from -`, which
+  reads IDs from stdin as one ID per line, a JSON array of ID strings, or the
+  full `inbox --ids-only` envelope. A form that yields zero IDs is a usage
+  error. The ack result lists the acknowledged event IDs in `events`. An
+  envelope with `has_more: true` is a usage error: ack a complete page.
 
 ## Integration modes
 
