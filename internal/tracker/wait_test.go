@@ -304,6 +304,80 @@ func TestWaitExcludeSelf(t *testing.T) {
 	})
 }
 
+// TestWaitSkipEmptyReviews: empty COMMENTED review containers are delivered
+// by default; SkipEmptyReviews skips them at delivery. The backlog is
+// delivered without running a cycle, so no bootstrap lease is needed.
+func TestWaitSkipEmptyReviews(t *testing.T) {
+	e := newEnvAt(t, baseTime)
+
+	target, err := github.ParseTarget(testURL)
+	if err != nil {
+		t.Fatalf("parse target: %v", err)
+	}
+	if _, err := e.st.Publish(context.Background(), store.PublishInput{
+		Target:  target,
+		Account: "alice",
+		Snapshot: &forge.Snapshot{
+			Head:           "h1",
+			CollectedStart: baseTime,
+			CollectedEnd:   baseTime,
+			Reviews: []forge.Review{
+				{ID: "R1", Author: "rev", Body: "", State: "COMMENTED"},
+				{ID: "R2", Author: "rev", Body: "", State: "APPROVED"},
+				{ID: "R3", Author: "rev", Body: "real content", State: "COMMENTED"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	t.Run("default delivers empty reviews", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		res, err := runWait(t, e, WaitInput{URL: testURL, Consumer: "watcher"}, ctx, 5*time.Second)
+		if err != nil {
+			t.Fatalf("wait: %v", err)
+		}
+		if res.Status != StatusEvents {
+			t.Fatalf("wait status = %s, want events", res.Status)
+		}
+		// Target + R1 + R2 + R3 = 4.
+		if len(res.Events) != 4 {
+			t.Fatalf("events = %d, want 4 (target + 3 reviews)", len(res.Events))
+		}
+		var hasR1 bool
+		for _, ev := range res.Events {
+			if ev.ObjectID == "R1" {
+				hasR1 = true
+			}
+		}
+		if !hasR1 {
+			t.Error("empty review R1 not delivered by default")
+		}
+	})
+
+	t.Run("SkipEmptyReviews skips empty COMMENTED containers", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		res, err := runWait(t, e, WaitInput{URL: testURL, Consumer: "watcher", SkipEmptyReviews: true}, ctx, 5*time.Second)
+		if err != nil {
+			t.Fatalf("wait: %v", err)
+		}
+		if res.Status != StatusEvents {
+			t.Fatalf("wait status = %s, want events", res.Status)
+		}
+		// R1 skipped: target + R2 + R3 = 3.
+		if len(res.Events) != 3 {
+			t.Fatalf("events = %d, want 3 (target + R2 + R3)", len(res.Events))
+		}
+		for _, ev := range res.Events {
+			if ev.ObjectID == "R1" {
+				t.Error("empty review R1 delivered under SkipEmptyReviews")
+			}
+		}
+	})
+}
+
 // TestWaitDeliversEventsAppendedByOwnCycle: a cycle whose collection
 // publishes a snapshot exits with the appended events instead of sleeping
 // on the cadence.

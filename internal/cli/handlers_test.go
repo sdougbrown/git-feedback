@@ -492,6 +492,69 @@ func TestInboxExcludeSelf(t *testing.T) {
 	})
 }
 
+// TestInboxSkipEmptyReviews: empty COMMENTED review containers are delivered
+// by default; --skip-empty-reviews skips them at delivery while reviews with
+// content or decision states still deliver.
+func TestInboxSkipEmptyReviews(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	snap := &forge.Snapshot{
+		Head:           "headA",
+		CollectedStart: handlerBaseTime.Add(-time.Minute),
+		CollectedEnd:   handlerBaseTime,
+		Threads:        []forge.Thread{{ID: "t1", Author: "rev", Body: "fix this", Path: "a.go"}},
+		Reviews: []forge.Review{
+			{ID: "r1", Author: "rev", Body: "", State: "COMMENTED"},
+			{ID: "r2", Author: "rev", Body: "", State: "APPROVED"},
+			{ID: "r3", Author: "rev", Body: "real content", State: "COMMENTED"},
+		},
+	}
+	if _, err := st.Publish(context.Background(), store.PublishInput{
+		Target: handlerTarget(), Account: "alice", Snapshot: snap,
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	t.Run("default delivers empty reviews", func(t *testing.T) {
+		code, env, _ := runCLI(t, []string{"inbox", "--consumer", "ci", "--state-dir", dir, handlerURL})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertContract(t, env)
+		events := env["events"].([]any)
+		// 1 target + 1 thread + 3 reviews = 5.
+		if len(events) != 5 {
+			t.Fatalf("events = %d, want 5 (target + thread + reviews)", len(events))
+		}
+		var hasR1 bool
+		for _, e := range events {
+			if m, ok := e.(map[string]any); ok && m["object_id"] == "r1" {
+				hasR1 = true
+			}
+		}
+		if !hasR1 {
+			t.Error("empty review r1 not delivered by default")
+		}
+	})
+
+	t.Run("--skip-empty-reviews skips empty COMMENTED containers", func(t *testing.T) {
+		code, env, _ := runCLI(t, []string{"inbox", "--consumer", "ci", "--skip-empty-reviews", "--state-dir", dir, handlerURL})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertContract(t, env)
+		events := env["events"].([]any)
+		// r1 (empty COMMENTED) skipped: 1 target + 1 thread + r2 + r3 = 4.
+		if len(events) != 4 {
+			t.Fatalf("events = %d, want 4 (target + thread + r2 + r3)", len(events))
+		}
+		for _, e := range events {
+			if m, ok := e.(map[string]any); ok && m["object_id"] == "r1" {
+				t.Error("empty review r1 delivered under --skip-empty-reviews")
+			}
+		}
+	})
+}
+
 func TestAckRejectsUnknownID(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")

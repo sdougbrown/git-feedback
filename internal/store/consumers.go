@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/sdougbrown/git-feedback/internal/forge"
@@ -35,6 +36,26 @@ type InboxInput struct {
 	// this canonical login. Author-less (legacy) events are always delivered.
 	// Empty means no filtering.
 	ExcludeAuthor string
+	// SkipEmptyReviews, when true, filters out review events whose review, as
+	// recorded in the event's snapshot body, is an empty COMMENTED container
+	// (GitHub creates one per inline reply). Reviews with decision states
+	// (APPROVED, CHANGES_REQUESTED, DISMISSED) and reviews absent from the
+	// snapshot body (not_observed events) are always delivered.
+	SkipEmptyReviews bool
+}
+
+// emptyReview reports whether a review is a content-free COMMENTED container:
+// GitHub's inline-reply containers carry state COMMENTED and no body. A
+// non-COMMENTED state is itself content (a decision), so it never counts as
+// empty regardless of body.
+func emptyReview(state, body string) bool {
+	return state == "COMMENTED" && strings.TrimSpace(body) == ""
+}
+
+// parseSnapshotSeq converts an "s<seq>" snapshot ID to its sequence.
+func parseSnapshotSeq(id string) int64 {
+	seq, _ := parseSnapshotID(id)
+	return seq
 }
 
 // InboxResult is one bounded page of pending events.
@@ -151,20 +172,33 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 		where += ` AND (e.author = '' OR e.author != ?)`
 		args = append(args, excludeAuthor)
 	}
-	args = append(args, limit+1)
-	rows, err := s.db.QueryContext(ctx, `
+	// Without the empty-review filter the SQL row limit bounds the scan at
+	// limit+1 deliverable rows; with it, emptiness lives in the snapshot
+	// body, so filtering happens after the scan and the row limit moves into
+	// the scan loop below.
+	if !in.SkipEmptyReviews {
+		args = append(args, limit+1)
+	}
+	query := `
 		SELECT e.id, e.kind, e.object_kind, e.object_id, e.revision, e.url, e.snapshot_id, e.observed_at, e.head_before, e.head_after, e.author
 		FROM events e
 		LEFT JOIN acks a ON a.event_id = e.id AND a.consumer = ? AND a.stream_id = e.stream_id
-		`+where+`
-		ORDER BY e.id ASC
-		LIMIT ?`, args...)
+		` + where + `
+		ORDER BY e.id ASC`
+	if !in.SkipEmptyReviews {
+		query += ` LIMIT ?`
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return InboxResult{}, &Error{Code: CodeStore, Message: fmt.Sprintf("read inbox: %v", err)}
 	}
 	defer rows.Close()
 
 	events := make([]Event, 0, limit)
+	// Materialize the candidate rows before filtering: the emptiness check
+	// queries snapshot bodies on the same connection, which cannot run while
+	// a row cursor is open.
+	candidates := make([]Event, 0, limit+1)
 	for rows.Next() {
 		var ev Event
 		var observedAt string
@@ -180,10 +214,36 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 			return InboxResult{}, &Error{Code: CodeStoreCorrupt, Message: "unparseable observed_at in events"}
 		}
 		ev.HeadBefore, ev.HeadAfter = headBefore.String, headAfter.String
-		events = append(events, ev)
+		candidates = append(candidates, ev)
 	}
 	if err := rows.Err(); err != nil {
 		return InboxResult{}, &Error{Code: CodeStore, Message: fmt.Sprintf("read inbox: %v", err)}
+	}
+	rows.Close()
+
+	// reviewContents caches parsed snapshot bodies: snapshot seq → review ID
+	// → (state, body). Only populated when SkipEmptyReviews is set.
+	reviewContents := map[int64]map[string][2]string{}
+	deliverable := 0
+	for _, ev := range candidates {
+		if in.SkipEmptyReviews {
+			skip, ferr := s.emptyReviewEvent(ctx, ev, parseSnapshotSeq(ev.SnapshotID), reviewContents)
+			if ferr != nil {
+				return InboxResult{}, ferr
+			}
+			if skip {
+				continue
+			}
+		}
+		events = append(events, ev)
+		deliverable++
+		// With the filter on the candidate scan is unbounded by SQL; stop
+		// once limit+1 deliverable events are in hand (the (limit+1)-th
+		// stays pending and is re-read on the next page, as without the
+		// filter).
+		if in.SkipEmptyReviews && deliverable == limit+1 {
+			break
+		}
 	}
 
 	result := InboxResult{Events: events, HighWater: highWater}
@@ -201,6 +261,49 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 		}
 	}
 	return result, nil
+}
+
+// emptyReviewEvent reports whether one event must be skipped under
+// SkipEmptyReviews: a review event whose review, as recorded in the event's
+// snapshot body, is an empty COMMENTED container. Events for reviews absent
+// from the snapshot body (not_observed, and any event whose snapshot predates
+// the review's presence) cannot be classified and are delivered. cache maps
+// snapshot seq to that snapshot's review content by ID (nil: body unreadable
+// or missing).
+func (s *Store) emptyReviewEvent(ctx context.Context, ev Event, snapSeq int64, cache map[int64]map[string][2]string) (bool, error) {
+	if ev.ObjectKind != string(forge.KindReview) || ev.Kind == KindNotObserved {
+		return false, nil
+	}
+	reviews, ok := cache[snapSeq]
+	if !ok {
+		var body string
+		err := s.db.QueryRowContext(ctx, `SELECT body FROM snapshots WHERE id = ?`, snapSeq).Scan(&body)
+		if err == sql.ErrNoRows {
+			// A missing snapshot body cannot be classified; deliver.
+			cache[snapSeq] = nil
+			return false, nil
+		}
+		if err != nil {
+			return false, &Error{Code: CodeStore, Message: fmt.Sprintf("read snapshot body: %v", err)}
+		}
+		var snap forge.Snapshot
+		if err := json.Unmarshal([]byte(body), &snap); err != nil {
+			return false, &Error{Code: CodeStoreCorrupt, Message: "unparseable snapshot body"}
+		}
+		reviews = make(map[string][2]string, len(snap.Reviews))
+		for _, r := range snap.Reviews {
+			reviews[r.ID] = [2]string{r.State, r.Body}
+		}
+		cache[snapSeq] = reviews
+	}
+	if reviews == nil {
+		return false, nil
+	}
+	content, ok := reviews[ev.ObjectID]
+	if !ok {
+		return false, nil
+	}
+	return emptyReview(content[0], content[1]), nil
 }
 
 // AckInput acknowledges exactly the supplied event IDs for one consumer and

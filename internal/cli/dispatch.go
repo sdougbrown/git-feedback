@@ -82,7 +82,7 @@ var specs = map[string]commandSpec{
 		handle: handleSnapshot,
 	},
 	"inbox": {
-		flags:  []flagSpec{{"consumer", flagString}, {"limit", flagString}, {"after", flagString}, {"ids-only", flagBool}, {"exclude-self", flagBool}},
+		flags:  []flagSpec{{"consumer", flagString}, {"limit", flagString}, {"after", flagString}, {"ids-only", flagBool}, {"exclude-self", flagBool}, {"skip-empty-reviews", flagBool}},
 		handle: handleInbox,
 	},
 	"ack": {
@@ -90,7 +90,7 @@ var specs = map[string]commandSpec{
 		handle: handleAck,
 	},
 	"wait": {
-		flags:  []flagSpec{{"consumer", flagString}, {"timeout", flagString}, {"head", flagString}, {"limit", flagString}, {"exclude-self", flagBool}},
+		flags:  []flagSpec{{"consumer", flagString}, {"timeout", flagString}, {"head", flagString}, {"limit", flagString}, {"exclude-self", flagBool}, {"skip-empty-reviews", flagBool}},
 		handle: handleWait,
 	},
 }

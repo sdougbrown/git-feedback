@@ -39,12 +39,13 @@ func handleWait(ctx context.Context, inv Invocation) (Result, error) {
 	}
 
 	res, err := eng.Wait(ctx, tracker.WaitInput{
-		URL:         inv.URL,
-		Head:        inv.Flags["head"],
-		Account:     inv.Flags["account"],
-		Consumer:    consumer,
-		Limit:       limit,
-		ExcludeSelf: inv.Bools["exclude-self"],
+		URL:              inv.URL,
+		Head:             inv.Flags["head"],
+		Account:          inv.Flags["account"],
+		Consumer:         consumer,
+		Limit:            limit,
+		ExcludeSelf:      inv.Bools["exclude-self"],
+		SkipEmptyReviews: inv.Bools["skip-empty-reviews"],
 	})
 	if err != nil {
 		return Result{}, mapReconcileError(err)

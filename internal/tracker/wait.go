@@ -48,6 +48,10 @@ type WaitInput struct {
 	// equals the stream's own account from delivery. When true, all events
 	// are delivered. The filter follows the account known at each cycle.
 	ExcludeSelf bool
+	// SkipEmptyReviews, when true, filters out review events whose review is
+	// an empty COMMENTED container (GitHub's inline-reply containers). The
+	// store classifies emptiness from the event's snapshot body at delivery.
+	SkipEmptyReviews bool
 }
 
 // WaitResult is the terminal wait outcome: delivered events or the
@@ -280,11 +284,12 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 		excludeAuthor = forge.CanonicalAccount(account)
 	}
 	page, err := eng.Store.Inbox(ctx, store.InboxInput{
-		TargetID:      target.ID,
-		Account:       account,
-		Consumer:      in.Consumer,
-		Limit:         in.Limit,
-		ExcludeAuthor: excludeAuthor,
+		TargetID:         target.ID,
+		Account:          account,
+		Consumer:         in.Consumer,
+		Limit:            in.Limit,
+		ExcludeAuthor:    excludeAuthor,
+		SkipEmptyReviews: in.SkipEmptyReviews,
 	})
 	if err != nil {
 		var se *store.Error
