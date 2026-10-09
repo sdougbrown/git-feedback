@@ -121,10 +121,14 @@ parsing the full envelope.
 account by default, so the account's own comments, reviews, and replies do not
 compound the delivery. `--exclude-self` opts back in and delivers everything.
 Author-less and legacy events (no author) are always delivered, and the store and
-snapshot retention are unchanged — the filter applies only at delivery. A thread
-revision whose only change is the account's own resolution state carries the
-thread author (a reviewer), so it is not filtered; self-authored content is what
-filters.
+snapshot retention are unchanged — the filter applies only at delivery. Thread
+revisions are attributed to the authors of what changed: when every added or
+changed comment in the window is the account's own and nothing else changed but
+the resolution state, the revision is attributed to the account and filtered
+like the reply that caused it. A thread revision whose only change is the
+account's own resolution state carries the thread author (a reviewer), so it is
+not filtered — the payload does not say who resolved a thread; self-authored
+content is what filters.
 
 ## Explicit acknowledgement
 

@@ -143,6 +143,16 @@ func TestChangedResolvedThread(t *testing.T) {
 	if got := eventKinds(evs); !equal(got, want) {
 		t.Fatalf("events = %v, want %v", got, want)
 	}
+	// A resolution-state-only change reaches revisionAuthor's no-changed-
+	// comments branch: the event keeps the root author and stays deliverable,
+	// since the payload does not say who resolved the thread.
+	rev := revisionEvent(t, st, "t1")
+	if rev.Author != "reviewer" {
+		t.Fatalf("revision author = %q, want the root author (reviewer)", rev.Author)
+	}
+	if !deliveredUnderExclude(t, st, "t1") {
+		t.Error("resolution-only revision filtered under ExcludeAuthor, want delivered")
+	}
 }
 
 // TestUnchangedIdempotence verifies that an unchanged complete collection
@@ -321,6 +331,194 @@ func TestEventURLsPointAtObjects(t *testing.T) {
 	}
 	if notObserved.URL != testTarget().URL {
 		t.Errorf("not_observed event url = %q, want PR URL %q", notObserved.URL, testTarget().URL)
+	}
+}
+
+// revisionEvent returns the thread's newest revision event from an inbox
+// read (events are ordered ascending).
+func revisionEvent(t *testing.T, st *Store, objectID string) Event {
+	t.Helper()
+	var rev Event
+	for _, e := range events(t, st, "alice", "c1") {
+		if e.Kind == KindRevision && e.ObjectKind == string(forge.KindThread) && e.ObjectID == objectID {
+			rev = e
+		}
+	}
+	if rev.ID == "" {
+		t.Fatalf("no revision event for thread %s", objectID)
+	}
+	return rev
+}
+
+// deliveredUnderExclude reads the inbox with ExcludeAuthor set and reports
+// whether any revision event for the thread is delivered.
+func deliveredUnderExclude(t *testing.T, st *Store, objectID string) bool {
+	t.Helper()
+	res, err := st.Inbox(context.Background(), InboxInput{
+		TargetID: testTarget().ID, Account: "alice", Consumer: "c1",
+		ExcludeAuthor: "alice", Limit: MaxInboxLimit,
+	})
+	if err != nil {
+		t.Fatalf("inbox: %v", err)
+	}
+	for _, e := range res.Events {
+		if e.Kind == KindRevision && e.ObjectKind == string(forge.KindThread) && e.ObjectID == objectID {
+			return true
+		}
+	}
+	return false
+}
+
+// storedObjectAuthor reads the objects-table author for one object.
+func storedObjectAuthor(t *testing.T, st *Store, kind, id string) string {
+	t.Helper()
+	var author string
+	if err := st.db.QueryRow(`SELECT author FROM objects WHERE kind = ? AND provider_id = ?`, kind, id).Scan(&author); err != nil {
+		t.Fatalf("read object author: %v", err)
+	}
+	return author
+}
+
+// TestSelfReplyAttributedToAccount verifies that a self-authored reply to a
+// reviewer's thread rewrites the revision event's author to the account, so
+// the delivery filter applies, while the objects table keeps the root author.
+func TestSelfReplyAttributedToAccount(t *testing.T) {
+	st := openTestStore(t)
+	publish(t, st, "alice", mkSnapshot("headA",
+		[]forge.Thread{thread("t1", "fix this")}, nil, nil))
+	reply := thread("t1", "fix this")
+	reply.Comments = []forge.ThreadComment{{ID: "tc1", Author: "alice", Body: "on it", CreatedAt: baseTime}}
+	publish(t, st, "alice", mkSnapshot("headA", []forge.Thread{reply}, nil, nil))
+	rev := revisionEvent(t, st, "t1")
+	if rev.Author != "alice" {
+		t.Fatalf("revision author = %q, want the account (alice)", rev.Author)
+	}
+	if got := storedObjectAuthor(t, st, "thread", "t1"); got != "reviewer" {
+		t.Errorf("objects.author = %q, want the unchanged root author (reviewer)", got)
+	}
+	if deliveredUnderExclude(t, st, "t1") {
+		t.Error("self-reply revision delivered under ExcludeAuthor, want filtered")
+	}
+}
+
+// TestMixedReplyWindowDelivered verifies that a window containing both a self
+// reply and a reviewer reply keeps the root author and is delivered.
+func TestMixedReplyWindowDelivered(t *testing.T) {
+	st := openTestStore(t)
+	publish(t, st, "alice", mkSnapshot("headA",
+		[]forge.Thread{thread("t1", "fix this")}, nil, nil))
+	replies := thread("t1", "fix this")
+	replies.Comments = []forge.ThreadComment{
+		{ID: "tc1", Author: "reviewer", Body: "still broken", CreatedAt: baseTime},
+		{ID: "tc2", Author: "alice", Body: "on it", CreatedAt: baseTime},
+	}
+	publish(t, st, "alice", mkSnapshot("headA", []forge.Thread{replies}, nil, nil))
+	rev := revisionEvent(t, st, "t1")
+	if rev.Author != "reviewer" {
+		t.Fatalf("revision author = %q, want the root author (reviewer)", rev.Author)
+	}
+	if !deliveredUnderExclude(t, st, "t1") {
+		t.Error("mixed-author revision filtered under ExcludeAuthor, want delivered")
+	}
+}
+
+// TestSelfReplyAfterReappearanceFiltered verifies that a self-authored reply
+// on a thread reappearing after not_observed is attributed to the account:
+// the diff walks back to the last snapshot containing the thread.
+func TestSelfReplyAfterReappearanceFiltered(t *testing.T) {
+	st := openTestStore(t)
+	publish(t, st, "alice", mkSnapshot("headA",
+		[]forge.Thread{thread("t1", "fix this")}, nil, nil))
+	publish(t, st, "alice", mkSnapshot("headA", nil, nil, nil))
+	reply := thread("t1", "fix this")
+	reply.Comments = []forge.ThreadComment{{ID: "tc1", Author: "alice", Body: "on it", CreatedAt: baseTime}}
+	publish(t, st, "alice", mkSnapshot("headA", []forge.Thread{reply}, nil, nil))
+	rev := revisionEvent(t, st, "t1")
+	if rev.Author != "alice" {
+		t.Fatalf("revision author = %q, want the account (alice)", rev.Author)
+	}
+	if deliveredUnderExclude(t, st, "t1") {
+		t.Error("reappearance self-reply revision delivered under ExcludeAuthor, want filtered")
+	}
+}
+
+// TestSelfReplyEditFiltered verifies that editing one's own reply is
+// attributed to the account and filtered.
+func TestSelfReplyEditFiltered(t *testing.T) {
+	st := openTestStore(t)
+	publish(t, st, "alice", mkSnapshot("headA",
+		[]forge.Thread{thread("t1", "fix this")}, nil, nil))
+	first := thread("t1", "fix this")
+	first.Comments = []forge.ThreadComment{{ID: "tc1", Author: "alice", Body: "on it", CreatedAt: baseTime}}
+	publish(t, st, "alice", mkSnapshot("headA", []forge.Thread{first}, nil, nil))
+	edited := thread("t1", "fix this")
+	edited.Comments = []forge.ThreadComment{{ID: "tc1", Author: "alice", Body: "on it, pushed", CreatedAt: baseTime}}
+	publish(t, st, "alice", mkSnapshot("headA", []forge.Thread{edited}, nil, nil))
+	rev := revisionEvent(t, st, "t1")
+	if rev.Author != "alice" {
+		t.Fatalf("revision author = %q, want the account (alice)", rev.Author)
+	}
+	if deliveredUnderExclude(t, st, "t1") {
+		t.Error("self-reply edit revision delivered under ExcludeAuthor, want filtered")
+	}
+}
+
+// TestReviewerReplyDelivered verifies the regression guard: a reviewer-only
+// reply is still attributed to the thread author and delivered.
+func TestReviewerReplyDelivered(t *testing.T) {
+	st := openTestStore(t)
+	publish(t, st, "alice", mkSnapshot("headA",
+		[]forge.Thread{thread("t1", "fix this")}, nil, nil))
+	reply := thread("t1", "fix this")
+	reply.Comments = []forge.ThreadComment{{ID: "tc1", Author: "reviewer", Body: "still broken", CreatedAt: baseTime}}
+	publish(t, st, "alice", mkSnapshot("headA", []forge.Thread{reply}, nil, nil))
+	rev := revisionEvent(t, st, "t1")
+	if rev.Author != "reviewer" {
+		t.Fatalf("revision author = %q, want the root author (reviewer)", rev.Author)
+	}
+	if !deliveredUnderExclude(t, st, "t1") {
+		t.Error("reviewer reply revision filtered under ExcludeAuthor, want delivered")
+	}
+}
+
+// TestRootEditWithSelfReplyDelivered verifies that a thread root edit in
+// the same window as a self-authored reply keeps the root author: the
+// reviewer's edited root body is reviewer activity the filter must not hide.
+func TestRootEditWithSelfReplyDelivered(t *testing.T) {
+	st := openTestStore(t)
+	publish(t, st, "alice", mkSnapshot("headA",
+		[]forge.Thread{thread("t1", "fix this")}, nil, nil))
+	edited := thread("t1", "fixed", forge.ThreadComment{ID: "tc1", Author: "alice", Body: "done", CreatedAt: baseTime})
+	publish(t, st, "alice", mkSnapshot("headA", []forge.Thread{edited}, nil, nil))
+	rev := revisionEvent(t, st, "t1")
+	if rev.Author != "reviewer" {
+		t.Fatalf("revision author = %q, want the root author (reviewer) even with an all-self comment change", rev.Author)
+	}
+	if !deliveredUnderExclude(t, st, "t1") {
+		t.Error("root-edit revision filtered under ExcludeAuthor, want delivered")
+	}
+	if a := storedObjectAuthor(t, st, string(forge.KindThread), "t1"); a != "reviewer" {
+		t.Fatalf("objects.author = %q, want the root author (reviewer)", a)
+	}
+}
+
+// TestRemovedCommentDelivered verifies that a window in which a comment was
+// removed keeps the root author and is delivered: removals are never
+// attributable to the account.
+func TestRemovedCommentDelivered(t *testing.T) {
+	st := openTestStore(t)
+	publish(t, st, "alice", mkSnapshot("headA",
+		[]forge.Thread{thread("t1", "fix this")}, nil, nil))
+	withReply := thread("t1", "fix this")
+	withReply.Comments = []forge.ThreadComment{{ID: "tc1", Author: "alice", Body: "on it", CreatedAt: baseTime}}
+	publish(t, st, "alice", mkSnapshot("headA", []forge.Thread{withReply}, nil, nil))
+	publish(t, st, "alice", mkSnapshot("headA", []forge.Thread{thread("t1", "fix this")}, nil, nil))
+	rev := revisionEvent(t, st, "t1")
+	if rev.Author != "reviewer" {
+		t.Fatalf("revision author = %q, want the root author (reviewer)", rev.Author)
+	}
+	if !deliveredUnderExclude(t, st, "t1") {
+		t.Error("removal revision filtered under ExcludeAuthor, want delivered")
 	}
 }
 
