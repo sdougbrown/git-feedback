@@ -9,12 +9,12 @@ import (
 // host, repository identity, and change-request number. Host and Repo retain
 // the display spelling as collected; ID uses the canonical (lowercase) forms.
 type Target struct {
-	Forge  string
-	Host   string
-	Repo   string
-	Number int
-	ID     string
-	URL    string
+	Forge  string `json:"forge"`
+	Host   string `json:"host"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+	ID     string `json:"id"`
+	URL    string `json:"url"`
 }
 
 // NewTarget builds a Target whose ID is <forge>:<host>:<repo>:<number> with

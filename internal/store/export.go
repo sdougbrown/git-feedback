@@ -17,7 +17,7 @@ import (
 )
 
 // snapshotFileSchema is the pinned snapshot file format identifier.
-const snapshotFileSchema = "git-feedback-snapshot/v1"
+const snapshotFileSchema = "git-feedback-snapshot/v2"
 
 // ExportInput describes one snapshot export to one destination path.
 type ExportInput struct {
