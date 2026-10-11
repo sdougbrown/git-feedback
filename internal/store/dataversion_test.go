@@ -94,7 +94,7 @@ func TestRefuseDataVersionMismatches(t *testing.T) {
 		if err != nil {
 			t.Fatalf("open: %v", err)
 		}
-		if _, err := st.db.Exec(`UPDATE data_version SET version = ?`, 9999); err != nil {
+		if _, err := st.db.Exec(`UPDATE data_version SET version = ?`, SupportedDataVersion+1); err != nil {
 			t.Fatalf("set data version: %v", err)
 		}
 		st.Close()
