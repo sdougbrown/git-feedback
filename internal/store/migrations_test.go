@@ -34,6 +34,14 @@ func TestRefuseNewerSchema(t *testing.T) {
 	if !ok || se.Code != CodeStoreNewer {
 		t.Fatalf("error = %v, want code %s", err, CodeStoreNewer)
 	}
+	// The message must name the store path and the remedy.
+	wantPath := filepath.Join(dir, dbFilename)
+	if !strings.Contains(se.Message, wantPath) {
+		t.Errorf("message %q does not name the store path %q", se.Message, wantPath)
+	}
+	if !strings.Contains(se.Message, "store reset") {
+		t.Errorf("message %q does not name the remedy", se.Message)
+	}
 	// The store must survive untouched.
 	if _, err := os.Stat(filepath.Join(dir, dbFilename)); err != nil {
 		t.Fatalf("store file missing after refusal: %v", err)
@@ -173,6 +181,14 @@ func TestMigrationSelfIdentityPreservesRows(t *testing.T) {
 	}
 	if _, err := db.Exec(`INSERT INTO schema_version (version) VALUES (2)`); err != nil {
 		t.Fatalf("record version: %v", err)
+	}
+	// The store carries current data semantics, so the SQL migration path is
+	// what is under test; a store with no data version would be refused.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS data_version (version INTEGER NOT NULL)`); err != nil {
+		t.Fatalf("data_version: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO data_version (version) VALUES (?)`, SupportedDataVersion); err != nil {
+		t.Fatalf("record data version: %v", err)
 	}
 	seed := []string{
 		`INSERT INTO targets (stream_id, target_id, account, host, target_json)

@@ -13,7 +13,7 @@ Every subcommand writes exactly one JSON value to stdout. Go types live in
 ```json
 {
   "schema": "git-feedback/v1",
-  "command": "reconcile|snapshot|inbox|ack|wait",
+  "command": "reconcile|snapshot|inbox|ack|wait|store",
   "status": "updated|unchanged|deferred|busy|head_changed|ok|events|timeout|error",
   "target": {"id": "", "url": "", "forge": "", "host": "", "repo": "", "number": 0},
   "account": "<login>|null",
@@ -27,11 +27,12 @@ Every subcommand writes exactly one JSON value to stdout. Go types live in
   "has_more": false,
   "next_cursor": null,
   "export": {"path": "", "digest": "", "counts": {}},
+  "store": {"path": "", "target": null, "removed": false},
   "error": null
 }
 ```
 
-- `reconcile` returns `updated`, `unchanged`, `deferred`, `busy`, or `head_changed`. `snapshot`, `inbox`, and `ack` return `ok`. `wait` returns `events`, `timeout`, or `head_changed`; `head_changed` ends the wait when the consumer pinned a head that no longer matches the observed head. All of these exit 0.
+- `reconcile` returns `updated`, `unchanged`, `deferred`, `busy`, or `head_changed`. `snapshot`, `inbox`, `ack`, and `store path` return `ok`. `store reset` returns `updated` when store content was removed and `unchanged` otherwise. `wait` returns `events`, `timeout`, or `head_changed`; `head_changed` ends the wait when the consumer pinned a head that no longer matches the observed head. All of these exit 0.
 - `error` is `{"code": "", "message": "", "retryable": false}` with `status: "error"`. Operational errors exit 1; usage errors exit 2. Both still print the envelope.
 - `snapshot` may be null when no complete snapshot exists. `attempt` is nullable and reports the latest attempt separately from `snapshot.complete`. Deferred admission or failed refresh must never report a successful current attempt just because cached state exists.
 - `freshness.snapshot_observed_at` is the last successful complete observation for the returned snapshot, including unchanged collections. Set `stale` after the collection interval elapses or a subsequent refresh fails/drifts. Immutable snapshot collection timestamps remain unchanged.
@@ -72,6 +73,35 @@ Every subcommand writes exactly one JSON value to stdout. Go types live in
   An event ID not matching `^e[0-9]+$` is a usage error (exit 2) naming the
   expected form; `unknown_event` is reserved for well-formed IDs that are
   not in the stream.
+
+## Store lifecycle
+
+The store is a disposable cache, not a production database. Its default
+location is `os.UserConfigDir()/git-feedback/state` — macOS:
+`~/Library/Application Support/git-feedback/state`, Linux:
+`~/.config/git-feedback/state` (or `$XDG_CONFIG_HOME/git-feedback/state`),
+Windows: `%AppData%\git-feedback\state`. `git-feedback store path` prints the
+exact resolved path; `git-feedback store reset` deletes the store, optionally
+scoped to one target with `--target <URL>`.
+
+Deleting the store is always safe, but it costs the consumers their
+acknowledgements (previously delivered events may be delivered again) and the
+next collection is a new baseline: every visible feedback object is re-emitted
+as `initial_observation`.
+
+Besides the SQL schema version, the store carries a data version that tracks
+the meaning of stored values — fingerprint inputs, author normalization, and
+attribution rules. It is bumped whenever any of those semantics changes, so
+old rows are never silently reinterpreted (which would fabricate events).
+
+Upgrade note for v0.4.0: git-feedback now records a data version (version 2)
+and refuses stores whose data version is older — including every store written
+before data versioning existed, which count as version 1. The refusal is an
+error envelope with code `store_data_older` whose message names the store path
+and the remedy: delete the store, or run `git-feedback store reset`, and let
+the next collection re-baseline. A store written by a newer release is refused
+the same way with code `store_newer`. The tool never deletes or re-baselines a
+refused store on its own.
 
 ## Integration modes
 

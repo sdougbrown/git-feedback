@@ -88,6 +88,14 @@ func TestTrackingMigrationPreservesInbox(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO schema_version (version) VALUES (1)`); err != nil {
 		t.Fatalf("record version: %v", err)
 	}
+	// The store carries current data semantics, so the SQL migration path is
+	// what is under test; a store with no data version would be refused.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS data_version (version INTEGER NOT NULL)`); err != nil {
+		t.Fatalf("data_version: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO data_version (version) VALUES (?)`, SupportedDataVersion); err != nil {
+		t.Fatalf("record data version: %v", err)
+	}
 	seed := []string{
 		`INSERT INTO targets (stream_id, target_id, account, host, target_json)
 		 VALUES (1, 'github:github.com:owner/name:7', 'alice', 'github.com', '{}')`,

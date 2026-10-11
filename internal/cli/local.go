@@ -33,7 +33,9 @@ func stateDir(inv Invocation) (string, error) {
 	return filepath.Join(base, "git-feedback", "state"), nil
 }
 
-// openStore opens the invocation's store with the given clock.
+// openStore opens the invocation's store with the given clock. The store's
+// stable error code (store_error, store_corrupt, store_newer,
+// store_data_older) is preserved in the envelope.
 func openStore(inv Invocation, clk clock.Clock) (*store.Store, error) {
 	dir, err := stateDir(inv)
 	if err != nil {
@@ -41,16 +43,31 @@ func openStore(inv Invocation, clk clock.Clock) (*store.Store, error) {
 	}
 	st, err := store.Open(dir, store.Options{Clock: clk})
 	if err != nil {
-		return nil, &statusError{code: "store_error", message: err.Error()}
+		return nil, wrapStoreOpenError(err)
 	}
 	return st, nil
+}
+
+// wrapStoreOpenError maps a store open failure onto the envelope, keeping
+// the typed store code when one is present.
+func wrapStoreOpenError(err error) error {
+	var se *store.Error
+	if errors.As(err, &se) {
+		return &statusError{code: se.Code, message: err.Error(), err: err}
+	}
+	return &statusError{code: "store_error", message: err.Error(), err: err}
 }
 
 // parseTarget resolves the invocation URL. Unsupported hosts are rejected
 // as an operational error before any credential lookup; malformed URLs and
 // non-pull-request GitHub URLs are caller errors.
 func parseTarget(inv Invocation) (forge.Target, error) {
-	t, err := github.ParseTarget(inv.URL)
+	return parseTargetURL(inv.URL)
+}
+
+// parseTargetURL resolves one raw URL with the same rules as parseTarget.
+func parseTargetURL(raw string) (forge.Target, error) {
+	t, err := github.ParseTarget(raw)
 	if err == nil {
 		return t, nil
 	}

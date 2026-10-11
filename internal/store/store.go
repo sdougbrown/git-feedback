@@ -21,6 +21,7 @@ const (
 	CodeStore              = "store_error"
 	CodeStoreCorrupt       = "store_corrupt"
 	CodeStoreNewer         = "store_newer"
+	CodeStoreDataOlder     = "store_data_older"
 	CodeUnknownStream      = "unknown_stream"
 	CodeUnknownEvent       = "unknown_event"
 	CodeUnknownSnapshot    = "unknown_snapshot"
@@ -83,14 +84,14 @@ type Hooks struct {
 }
 
 // Open opens (creating if necessary) the private store inside stateDir and
-// applies pending schema migrations. A corrupt or newer-than-supported store
-// is refused without replacement.
+// applies pending schema migrations. A corrupt, newer-than-supported, or
+// older-data-version store is refused without replacement.
 func Open(stateDir string, opts Options) (*Store, error) {
-	db, _, err := openDatabase(stateDir, int(opts.BusyTimeout/time.Millisecond))
+	db, path, err := openDatabase(stateDir, int(opts.BusyTimeout/time.Millisecond))
 	if err != nil {
 		return nil, err
 	}
-	if err := migrate(db); err != nil {
+	if err := migrate(db, path); err != nil {
 		db.Close()
 		return nil, err
 	}
