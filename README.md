@@ -154,7 +154,9 @@ correct, or a reviewer has finished.
 `wait` is bounded by `--timeout` (default 30m). It retries transient network,
 5xx, and rate-limit outcomes until the deadline, then returns `timeout` with the
 last attempt in `attempt`. It returns immediately on fatal errors (auth, not
-found, account mismatch, unsupported host, or a pinned-head mismatch). SIGINT
+found, account mismatch, unsupported host). A pinned-head mismatch is not
+fatal: it returns `head_changed` with `expected_head` and `observed_head`, an
+empty `events` array, and exit 0. SIGINT
 exits 130 and SIGTERM exits 143, with no stdout and no acknowledgements. There is
 no resident service; stopping the waiting process stops network work. When `wait`
 delivers or times out, it also writes a one-line status summary to stderr — for

@@ -31,7 +31,7 @@ Every subcommand writes exactly one JSON value to stdout. Go types live in
 }
 ```
 
-- `reconcile` returns `updated`, `unchanged`, `deferred`, `busy`, or `head_changed`. `snapshot`, `inbox`, and `ack` return `ok`. `wait` returns `events` or `timeout`. All of these exit 0.
+- `reconcile` returns `updated`, `unchanged`, `deferred`, `busy`, or `head_changed`. `snapshot`, `inbox`, and `ack` return `ok`. `wait` returns `events`, `timeout`, or `head_changed`; `head_changed` ends the wait when the consumer pinned a head that no longer matches the observed head. All of these exit 0.
 - `error` is `{"code": "", "message": "", "retryable": false}` with `status: "error"`. Operational errors exit 1; usage errors exit 2. Both still print the envelope.
 - `snapshot` may be null when no complete snapshot exists. `attempt` is nullable and reports the latest attempt separately from `snapshot.complete`. Deferred admission or failed refresh must never report a successful current attempt just because cached state exists.
 - `freshness.snapshot_observed_at` is the last successful complete observation for the returned snapshot, including unchanged collections. Set `stale` after the collection interval elapses or a subsequent refresh fails/drifts. Immutable snapshot collection timestamps remain unchanged.
@@ -97,7 +97,9 @@ JSON result on events or deadline. The receiving harness calls `ack` separately.
   `git-feedback wait: status=events events=12 has_more=false` — so a monitor
   command can surface the outcome without parsing the envelope.
 - `wait` returns a single JSON result: `status: "events"` with the pending
-  events, or `status: "timeout"` when the deadline elapses.
+  events, or `status: "timeout"` when the deadline elapses. `status:
+  "head_changed"` ends the wait when the pinned head no longer matches the
+  observed head; it carries no events.
 - After the harness receives the result, it calls `ack` separately with the event
   IDs it wants to record as delivered. `wait` itself acknowledges nothing.
 
