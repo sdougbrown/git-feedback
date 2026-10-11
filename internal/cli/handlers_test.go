@@ -942,7 +942,7 @@ func TestAckEventsFromUsageErrors(t *testing.T) {
 		{"zero-id json array", "[]", []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
 		}},
-		{"not a json array", "[\"e1\", 2]", []string{
+		{"array item that is neither an ID string nor a record", "[\"e1\", 2]", []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
 		}},
 		{"record without id", `{"events":[{"id":"e1"},{"kind":"revision"}]}`, []string{
