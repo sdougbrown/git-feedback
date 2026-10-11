@@ -170,10 +170,11 @@ func TestResetRemovesDatabaseFiles(t *testing.T) {
 	}
 }
 
-// TestResetTargetScopesToTarget publishes streams for two targets, marks the
-// first target's events acknowledged, then resets the first target: its
-// rows vanish, the other target's stream survives with its events pending
-// for a new consumer, and host-scoped state (leases) survives.
+// TestResetTargetScopesToTarget publishes streams for two targets (the
+// first for two accounts), marks the first target's events acknowledged,
+// then resets the first target: its rows vanish for both accounts, the
+// other target's stream survives with its events pending for a new
+// consumer, and host-scoped state (leases) survives.
 func TestResetTargetScopesToTarget(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "state")
@@ -194,6 +195,17 @@ func TestResetTargetScopesToTarget(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("publish %s: %v", tgt.ID, err)
 		}
+	}
+	// The reset target is published for a second account too, so the
+	// cross-account reset contract is exercised.
+	if _, err := st.Publish(ctx, PublishInput{
+		Target:  testTarget(),
+		Account: "bob",
+		Snapshot: mkSnapshot("head-bob",
+			[]forge.Thread{{ID: "t1", Author: "rev", Body: "fix this", Path: "main.go"}},
+			nil, nil),
+	}); err != nil {
+		t.Fatalf("publish bob: %v", err)
 	}
 	evs := events(t, st, "alice", "c2")
 	if len(evs) == 0 {
@@ -216,9 +228,12 @@ func TestResetTargetScopesToTarget(t *testing.T) {
 		t.Error("reset reported no stream removed for the published target")
 	}
 
-	// The reset target's stream is gone; the other target's stream survives.
-	if _, ok, err := st.StreamID(ctx, testTarget().ID, "alice"); err != nil || ok {
-		t.Fatalf("stream for reset target still present (ok=%v, err=%v)", ok, err)
+	// The reset target's stream is gone for both accounts; the other
+	// target's stream survives.
+	for _, account := range []string{"alice", "bob"} {
+		if _, ok, err := st.StreamID(ctx, testTarget().ID, account); err != nil || ok {
+			t.Fatalf("stream for reset target still present for %s (ok=%v, err=%v)", account, ok, err)
+		}
 	}
 	if _, ok, err := st.StreamID(ctx, other.ID, "alice"); err != nil || !ok {
 		t.Fatalf("surviving stream missing (ok=%v, err=%v)", ok, err)

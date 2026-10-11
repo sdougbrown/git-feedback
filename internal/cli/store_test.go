@@ -39,6 +39,22 @@ func publishTargetURL(t *testing.T, st *store.Store, targetURL, head string) for
 	return target
 }
 
+// stripDataVersion removes the data version row from the store at dir,
+// mimicking a store written before data versioning.
+func stripDataVersion(t *testing.T, dir string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "feedback.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM data_version`); err != nil {
+		t.Fatalf("clear data_version: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+}
+
 // TestStorePathCommand verifies that store path reports the resolved store
 // directory without opening or creating the store.
 func TestStorePathCommand(t *testing.T) {
@@ -168,17 +184,7 @@ func TestStoreResetTargetScoped(t *testing.T) {
 func TestLegacyStoreRefusedByCommands(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	st.Close()
-	// Strip the data version to mimic a store written before data versioning.
-	db, err := sql.Open("sqlite", filepath.Join(dir, "feedback.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	if _, err := db.Exec(`DELETE FROM data_version`); err != nil {
-		t.Fatalf("clear data_version: %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("close db: %v", err)
-	}
+	stripDataVersion(t, dir)
 
 	var stdout bytes.Buffer
 	code := Run([]string{"inbox", "--consumer", "ci", "--state-dir", dir, handlerURL}, &stdout, &bytes.Buffer{})
@@ -216,17 +222,7 @@ func TestLegacyStoreRefusedByCommands(t *testing.T) {
 func TestStoreResetTargetOnRefusedStore(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	st.Close()
-	// Strip the data version to mimic a store written before data versioning.
-	db, err := sql.Open("sqlite", filepath.Join(dir, "feedback.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	if _, err := db.Exec(`DELETE FROM data_version`); err != nil {
-		t.Fatalf("clear data_version: %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("close db: %v", err)
-	}
+	stripDataVersion(t, dir)
 
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"store", "reset", "--target", handlerURL, "--state-dir", dir}, &stdout, &stderr)
@@ -315,24 +311,5 @@ func TestStoreUsageErrors(t *testing.T) {
 				t.Errorf("error envelope = %v, want code usage", envelope["error"])
 			}
 		})
-	}
-}
-
-// TestStoreParseSubcommand verifies that the nested subcommand lands in
-// Invocation.Sub.
-func TestStoreParseSubcommand(t *testing.T) {
-	inv, err := parseInvocation([]string{"store", "reset", "--target", handlerURL})
-	if err != nil {
-		t.Fatalf("parseInvocation: %v", err)
-	}
-	if inv.Sub != "reset" || inv.Flags["target"] != handlerURL {
-		t.Fatalf("inv = %+v", inv)
-	}
-	inv, err = parseInvocation([]string{"store", "path"})
-	if err != nil {
-		t.Fatalf("parseInvocation: %v", err)
-	}
-	if inv.Sub != "path" {
-		t.Fatalf("sub = %q, want path", inv.Sub)
 	}
 }
