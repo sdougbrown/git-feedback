@@ -99,12 +99,15 @@ func TestStoreResetRemovesStore(t *testing.T) {
 	st2.Close()
 }
 
-// TestStoreResetTargetScoped verifies that store reset --target deletes only
-// that target's stream; another target's stream survives.
+// TestStoreResetTargetScoped verifies the CLI seam for target-scoped reset:
+// argv -> parseTargetURL -> openStore -> ResetTarget -> status/envelope.
+// Scoping behavior (the other target's stream surviving, events staying
+// deliverable, host-scoped state surviving) is pinned by
+// TestResetTargetScopesToTarget in internal/store.
 func TestStoreResetTargetScoped(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")
-	other := publishTargetURL(t, st, "https://github.com/owner/other/pull/8", "head-other")
+	_ = publishTargetURL(t, st, "https://github.com/owner/other/pull/8", "head-other")
 	if err := st.Close(); err != nil {
 		t.Fatalf("close seed store: %v", err)
 	}
@@ -123,19 +126,6 @@ func TestStoreResetTargetScoped(t *testing.T) {
 	targetObj, ok := storeObj["target"].(map[string]any)
 	if !ok || targetObj["id"] != handlerTarget().ID {
 		t.Errorf("store.target = %v, want id %q", storeObj["target"], handlerTarget().ID)
-	}
-
-	// The scoped target is gone; the other target survives.
-	st2, err := store.Open(dir, store.Options{})
-	if err != nil {
-		t.Fatalf("open after reset: %v", err)
-	}
-	defer st2.Close()
-	if _, ok, err := st2.StreamID(context.Background(), handlerTarget().ID, "alice"); err != nil || ok {
-		t.Fatalf("reset target stream still present (ok=%v, err=%v)", ok, err)
-	}
-	if _, ok, err := st2.StreamID(context.Background(), other.ID, "alice"); err != nil || !ok {
-		t.Fatalf("surviving stream missing (ok=%v, err=%v)", ok, err)
 	}
 }
 
