@@ -82,9 +82,24 @@ func formatSnapshotID(seq int64) string { return fmt.Sprintf("s%d", seq) }
 
 func formatEventID(seq int64) string { return fmt.Sprintf("e%d", seq) }
 
+// ValidEventID reports whether id matches the event ID form ^e[0-9]+$.
+// It is the single source of truth for the form, shared with the CLI's
+// usage-error validation.
+func ValidEventID(id string) bool {
+	if len(id) < 2 || id[0] != 'e' {
+		return false
+	}
+	for i := 1; i < len(id); i++ {
+		if id[i] < '0' || id[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // parseEventID parses an "e<seq>" event ID.
 func parseEventID(id string) (int64, bool) {
-	if len(id) < 2 || id[0] != 'e' {
+	if !ValidEventID(id) {
 		return 0, false
 	}
 	var seq int64

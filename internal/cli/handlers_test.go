@@ -684,17 +684,22 @@ func TestAckMalformedIDIsUsage(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")
 	tests := []struct {
-		name string
-		argv []string
+		name  string
+		argv  []string
+		stdin string
 	}{
-		{"embedded flag", []string{"ack", "--consumer", "ci", "--event=e3\n--event=e4", "--state-dir", dir, handlerURL}},
-		{"internal whitespace", []string{"ack", "--consumer", "ci", "--event=e3 e4", "--state-dir", dir, handlerURL}},
-		{"flag-shaped value", []string{"ack", "--consumer", "ci", "--event=--event=e4", "--state-dir", dir, handlerURL}},
-		{"missing digits", []string{"ack", "--consumer", "ci", "--event=e", "--state-dir", dir, handlerURL}},
-		{"negative digits", []string{"ack", "--consumer", "ci", "--event=e-3", "--state-dir", dir, handlerURL}},
+		{"embedded flag", []string{"ack", "--consumer", "ci", "--event=e3\n--event=e4", "--state-dir", dir, handlerURL}, ""},
+		{"internal whitespace", []string{"ack", "--consumer", "ci", "--event=e3 e4", "--state-dir", dir, handlerURL}, ""},
+		{"flag-shaped value", []string{"ack", "--consumer", "ci", "--event=--event=e4", "--state-dir", dir, handlerURL}, ""},
+		{"missing digits", []string{"ack", "--consumer", "ci", "--event=e", "--state-dir", dir, handlerURL}, ""},
+		{"negative digits", []string{"ack", "--consumer", "ci", "--event=e-3", "--state-dir", dir, handlerURL}, ""},
+		{"stdin malformed", []string{"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL}, "e1\nbogus\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.stdin != "" {
+				withStdin(t, tc.stdin)
+			}
 			code, env, _ := runCLI(t, tc.argv)
 			if code != 2 {
 				t.Fatalf("exit = %d, want 2 (%v)", code, env["error"])
