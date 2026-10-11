@@ -203,9 +203,47 @@ func TestLegacyStoreRefusedByCommands(t *testing.T) {
 	if code != ExitOK || env["status"] != StatusUpdated {
 		t.Fatalf("remedy reset: exit %d status %v, want 0/%s", code, env["status"], StatusUpdated)
 	}
+	// A second reset on the already-removed store is a no-op: unchanged, exit 0.
 	code, _, _ = runCLI(t, []string{"store", "reset", "--state-dir", dir})
 	if code != ExitOK {
-		t.Fatalf("post-reset store unusable: exit %d", code)
+		t.Fatalf("second reset exit code = %d, want 0", code)
+	}
+}
+
+// TestStoreResetTargetOnRefusedStore verifies that a target-scoped reset
+// on a refused (legacy) store fails with the store path and remedy in
+// the envelope, like any other command that must open the store.
+func TestStoreResetTargetOnRefusedStore(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	st.Close()
+	// Strip the data version to mimic a store written before data versioning.
+	db, err := sql.Open("sqlite", filepath.Join(dir, "feedback.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM data_version`); err != nil {
+		t.Fatalf("clear data_version: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"store", "reset", "--target", handlerURL, "--state-dir", dir}, &stdout, &stderr)
+	if code != ExitOperational {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON value: %v (%q)", err, stdout.String())
+	}
+	errObj, ok := envelope["error"].(map[string]any)
+	if !ok || errObj["code"] != store.CodeStoreDataOlder {
+		t.Fatalf("error envelope = %v, want code %s", envelope["error"], store.CodeStoreDataOlder)
+	}
+	msg, _ := errObj["message"].(string)
+	if !strings.Contains(msg, filepath.Join(dir, "feedback.db")) || !strings.Contains(msg, "store reset") {
+		t.Errorf("message %q does not name the path and remedy", msg)
 	}
 }
 
@@ -222,6 +260,24 @@ func TestStoreResetTargetUnknownStream(t *testing.T) {
 	}
 	if env["status"] != StatusUnchanged {
 		t.Errorf("status = %v, want %s", env["status"], StatusUnchanged)
+	}
+}
+
+// TestStoreResetTargetDoesNotCreateStore verifies that a target-scoped
+// reset on a fresh state directory reports unchanged without creating the
+// store.
+func TestStoreResetTargetDoesNotCreateStore(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	code, env, _ := runCLI(t, []string{"store", "reset", "--target", handlerURL, "--state-dir", dir})
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if env["status"] != StatusUnchanged {
+		t.Errorf("status = %v, want %s", env["status"], StatusUnchanged)
+	}
+	// The store must not have been created.
+	if _, err := os.Stat(filepath.Join(dir, "feedback.db")); !os.IsNotExist(err) {
+		t.Error("target reset created the store database")
 	}
 }
 

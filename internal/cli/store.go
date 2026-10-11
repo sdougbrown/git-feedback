@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
 	"github.com/sdougbrown/git-feedback/internal/store"
 )
@@ -68,6 +70,15 @@ func handleStoreReset(ctx context.Context, inv Invocation) (Result, error) {
 		Host:   t.Host,
 		Repo:   t.Repo,
 		Number: t.Number,
+	}
+	// A target-scoped reset needs the store open; with no store file
+	// there is nothing to reset — report unchanged without creating one.
+	if _, err := os.Stat(filepath.Join(dir, "feedback.db")); err != nil {
+		if os.IsNotExist(err) {
+			r.Status = StatusUnchanged
+			return r, nil
+		}
+		return r, err
 	}
 	clk := newClock()
 	st, err := openStore(inv, clk)

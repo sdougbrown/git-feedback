@@ -125,6 +125,13 @@ func TestResetRemovesDatabaseFiles(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
+	// A process killed mid-transaction can leave non-empty WAL sidecars
+	// behind; Reset must remove those too.
+	for _, name := range []string{dbFilename + "-wal", dbFilename + "-shm"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+	}
 
 	removed, err := Reset(dir)
 	if err != nil {
@@ -133,8 +140,10 @@ func TestResetRemovesDatabaseFiles(t *testing.T) {
 	if !removed {
 		t.Error("reset reported nothing removed for an existing store")
 	}
-	if _, err := os.Stat(filepath.Join(dir, dbFilename)); !os.IsNotExist(err) {
-		t.Fatal("database file still present after reset")
+	for _, name := range []string{dbFilename, dbFilename + "-wal", dbFilename + "-shm"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s still present after reset", name)
+		}
 	}
 
 	// A second reset has nothing to remove.
