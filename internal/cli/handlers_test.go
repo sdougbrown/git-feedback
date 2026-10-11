@@ -951,7 +951,7 @@ func TestAckEventsFromUsageErrors(t *testing.T) {
 		{"record with non-string id", `{"events":[{"id":1}]}`, []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
 		}},
-		{"array with non-record item", `["e1", {"kind":"revision"}]`, []string{
+		{"array item without id field", `["e1", {"kind":"revision"}]`, []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
 		}},
 		{"non-stdin value", "e1\n", []string{
