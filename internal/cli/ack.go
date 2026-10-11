@@ -148,7 +148,7 @@ func readEventIDsFromStdin(r io.Reader) ([]string, error) {
 			ids = append(ids, id)
 		}
 		if envelope.HasMore {
-			return nil, &usageError{"ack --events-from - received a truncated inbox page (has_more: true); rerun inbox with --limit 200 or page with --after"}
+			return nil, &usageError{"ack --events-from - received a truncated page (has_more: true); rerun inbox or wait with a larger --limit; inbox can page with --after"}
 		}
 	default:
 		ids = make([]string, 0)
