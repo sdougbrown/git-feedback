@@ -82,6 +82,13 @@ func TestStoreResetRemovesStore(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "feedback.db")); !os.IsNotExist(err) {
 		t.Error("database file still present after reset")
 	}
+	storeObj, ok := env["store"].(map[string]any)
+	if !ok {
+		t.Fatalf("store = %v, want object", env["store"])
+	}
+	if storeObj["removed"] != true {
+		t.Errorf("store.removed = %v, want true", storeObj["removed"])
+	}
 
 	code, env, _ = runCLI(t, []string{"store", "reset", "--state-dir", dir})
 	if code != ExitOK {
@@ -89,6 +96,13 @@ func TestStoreResetRemovesStore(t *testing.T) {
 	}
 	if env["status"] != StatusUnchanged {
 		t.Errorf("second reset status = %v, want %s", env["status"], StatusUnchanged)
+	}
+	storeObj, ok = env["store"].(map[string]any)
+	if !ok {
+		t.Fatalf("store = %v, want object", env["store"])
+	}
+	if storeObj["removed"] != false {
+		t.Errorf("store.removed = %v, want false", storeObj["removed"])
 	}
 
 	// The reset store is usable again.
@@ -126,6 +140,9 @@ func TestStoreResetTargetScoped(t *testing.T) {
 	targetObj, ok := storeObj["target"].(map[string]any)
 	if !ok || targetObj["id"] != handlerTarget().ID {
 		t.Errorf("store.target = %v, want id %q", storeObj["target"], handlerTarget().ID)
+	}
+	if storeObj["removed"] != true {
+		t.Errorf("store.removed = %v, want true", storeObj["removed"])
 	}
 }
 

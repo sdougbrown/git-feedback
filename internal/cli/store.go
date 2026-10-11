@@ -50,6 +50,7 @@ func handleStoreReset(ctx context.Context, inv Invocation) (Result, error) {
 		if err != nil {
 			return r, wrapStoreOpenError(err)
 		}
+		r.Store.Removed = removed
 		r.Status = StatusUnchanged
 		if removed {
 			r.Status = StatusUpdated
@@ -78,6 +79,7 @@ func handleStoreReset(ctx context.Context, inv Invocation) (Result, error) {
 	if err != nil {
 		return r, mapStoreError(err)
 	}
+	r.Store.Removed = removed
 	r.Status = StatusUnchanged
 	if removed {
 		r.Status = StatusUpdated
