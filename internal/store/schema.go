@@ -11,8 +11,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// dbFilename is the SQLite database file inside the state directory.
-const dbFilename = "feedback.db"
+// DBFilename is the SQLite database file inside the state directory.
+const DBFilename = "feedback.db"
 
 // DefaultBusyTimeout is the pinned busy timeout applied when an option
 // does not override it.
@@ -52,7 +52,7 @@ func openDatabase(stateDir string, busyTimeoutMS int) (*sql.DB, string, error) {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, "", &Error{Code: CodeStore, Message: fmt.Sprintf("restrict state directory: %v", err)}
 	}
-	path := filepath.Join(dir, dbFilename)
+	path := filepath.Join(dir, DBFilename)
 	db, err := sql.Open("sqlite", dsn(path, busyTimeoutMS))
 	if err != nil {
 		return nil, "", corruptOrStore(path, err)

@@ -23,7 +23,7 @@ var resetTables = []string{
 func Reset(stateDir string) (bool, error) {
 	dir := filepath.Clean(stateDir)
 	removed := false
-	for _, name := range []string{dbFilename, dbFilename + "-wal", dbFilename + "-shm"} {
+	for _, name := range []string{DBFilename, DBFilename + "-wal", DBFilename + "-shm"} {
 		path := filepath.Join(dir, name)
 		if _, err := os.Stat(path); err != nil {
 			if os.IsNotExist(err) {

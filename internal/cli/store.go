@@ -11,15 +11,12 @@ import (
 // handleStore dispatches the store subcommand. The store is a disposable
 // cache: `path` prints where it lives, and `reset` deletes it — wholly or
 // scoped to one target — so the next collection starts from a new baseline.
+// parseInvocation guarantees Sub is "path" or "reset" before dispatch.
 func handleStore(ctx context.Context, inv Invocation) (Result, error) {
-	switch inv.Sub {
-	case "path":
+	if inv.Sub == "path" {
 		return handleStorePath(inv)
-	case "reset":
-		return handleStoreReset(ctx, inv)
-	default:
-		return Result{}, &usageError{`store requires a subcommand: "path" or "reset"`}
 	}
+	return handleStoreReset(ctx, inv)
 }
 
 // handleStorePath resolves and reports the effective store directory. It
@@ -73,7 +70,7 @@ func handleStoreReset(ctx context.Context, inv Invocation) (Result, error) {
 	}
 	// A target-scoped reset needs the store open; with no store file
 	// there is nothing to reset — report unchanged without creating one.
-	if _, err := os.Stat(filepath.Join(dir, "feedback.db")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, store.DBFilename)); err != nil {
 		if os.IsNotExist(err) {
 			r.Status = StatusUnchanged
 			return r, nil

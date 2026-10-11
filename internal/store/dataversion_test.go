@@ -49,7 +49,7 @@ func TestRefuseLegacyStoreWithoutDataVersion(t *testing.T) {
 	if !ok || se.Code != CodeStoreDataOlder {
 		t.Fatalf("error = %v, want code %s", err, CodeStoreDataOlder)
 	}
-	wantPath := filepath.Join(dir, dbFilename)
+	wantPath := filepath.Join(dir, DBFilename)
 	if !strings.Contains(se.Message, wantPath) {
 		t.Errorf("message %q does not name the store path %q", se.Message, wantPath)
 	}
@@ -84,7 +84,7 @@ func TestRefuseDataVersionMismatches(t *testing.T) {
 		if !ok || se.Code != CodeStoreDataOlder {
 			t.Fatalf("error = %v, want code %s", err, CodeStoreDataOlder)
 		}
-		if !strings.Contains(se.Message, filepath.Join(dir, dbFilename)) {
+		if !strings.Contains(se.Message, filepath.Join(dir, DBFilename)) {
 			t.Errorf("message %q does not name the store path", se.Message)
 		}
 	})
@@ -107,7 +107,7 @@ func TestRefuseDataVersionMismatches(t *testing.T) {
 		if !ok || se.Code != CodeStoreNewer {
 			t.Fatalf("error = %v, want code %s", err, CodeStoreNewer)
 		}
-		if !strings.Contains(se.Message, filepath.Join(dir, dbFilename)) {
+		if !strings.Contains(se.Message, filepath.Join(dir, DBFilename)) {
 			t.Errorf("message %q does not name the store path", se.Message)
 		}
 	})
@@ -127,7 +127,7 @@ func TestResetRemovesDatabaseFiles(t *testing.T) {
 	}
 	// A process killed mid-transaction can leave non-empty WAL sidecars
 	// behind; Reset must remove those too.
-	for _, name := range []string{dbFilename + "-wal", dbFilename + "-shm"} {
+	for _, name := range []string{DBFilename + "-wal", DBFilename + "-shm"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
 			t.Fatalf("create %s: %v", name, err)
 		}
@@ -140,7 +140,7 @@ func TestResetRemovesDatabaseFiles(t *testing.T) {
 	if !removed {
 		t.Error("reset reported nothing removed for an existing store")
 	}
-	for _, name := range []string{dbFilename, dbFilename + "-wal", dbFilename + "-shm"} {
+	for _, name := range []string{DBFilename, DBFilename + "-wal", DBFilename + "-shm"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
 			t.Errorf("%s still present after reset", name)
 		}

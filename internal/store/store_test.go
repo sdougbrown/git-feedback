@@ -86,7 +86,7 @@ func mustAck(t *testing.T, st *Store, account, consumer string, ids ...string) A
 // round-trips a publication, and that the DSN keeps its three pinned pragmas.
 func TestDSNPathEscaping(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "st?te #dir")
-	full := filepath.Join(dir, dbFilename)
+	full := filepath.Join(dir, DBFilename)
 
 	// The DSN must escape the path so the driver's first-'?' split and the
 	// SQLite URI decode target the real file, and must keep all three pragmas.
