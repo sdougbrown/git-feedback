@@ -110,6 +110,9 @@ func TestRefuseDataVersionMismatches(t *testing.T) {
 		if !strings.Contains(se.Message, filepath.Join(dir, DBFilename)) {
 			t.Errorf("message %q does not name the store path", se.Message)
 		}
+		if !strings.Contains(se.Message, "store reset") {
+			t.Errorf("message %q does not name the store reset remedy", se.Message)
+		}
 	})
 }
 
