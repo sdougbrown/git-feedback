@@ -848,6 +848,65 @@ func TestAckEventsFromStdin(t *testing.T) {
 	})
 }
 
+func TestAckEventsFromEventRecords(t *testing.T) {
+	t.Run("full inbox records envelope", func(t *testing.T) {
+		// The exact pipeline from the issue: inbox (default full records)
+		// piped straight into ack, with no --ids-only step.
+		dir, st, _ := handlerEnv(t)
+		publishHandler(t, st, "alice")
+		_, _, inboxStdout, _ := runCLIStd(t, []string{
+			"inbox", "--consumer", "ci", "--state-dir", dir, handlerURL,
+		})
+		withStdin(t, inboxStdout)
+
+		code, env, _ := runCLI(t, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertContract(t, env)
+		assertAckReceipt(t, env, "e1", "e2", "e3", "e4")
+		if n := pendingCount(t, st); n != 0 {
+			t.Errorf("pending events = %d, want 0 after records envelope ack", n)
+		}
+	})
+
+	t.Run("bare array of event records", func(t *testing.T) {
+		dir, st, _ := handlerEnv(t)
+		publishHandler(t, st, "alice")
+		withStdin(t, `[ {"id": "e1", "kind": "revision"}, {"id": "e2", "kind": "revision"} ]`)
+
+		code, env, _ := runCLI(t, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertAckReceipt(t, env, "e1", "e2")
+		if n := pendingCount(t, st); n != 2 {
+			t.Errorf("pending events = %d, want 2 after records array ack", n)
+		}
+	})
+
+	t.Run("mixed IDs and records", func(t *testing.T) {
+		dir, st, _ := handlerEnv(t)
+		publishHandler(t, st, "alice")
+		withStdin(t, `["e1", {"id": "e2"}]`)
+
+		code, env, _ := runCLI(t, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertAckReceipt(t, env, "e1", "e2")
+		if n := pendingCount(t, st); n != 2 {
+			t.Errorf("pending events = %d, want 2 after mixed ack", n)
+		}
+	})
+}
+
 func TestAckEventsFromCombinedWithEventFlag(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")
@@ -886,11 +945,17 @@ func TestAckEventsFromUsageErrors(t *testing.T) {
 		{"not a json array", "[\"e1\", 2]", []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
 		}},
+		{"record without id", `{"events":[{"id":"e1"},{"kind":"revision"}]}`, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}},
+		{"record with non-string id", `{"events":[{"id":1}]}`, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}},
+		{"array with non-record item", `["e1", {"kind":"revision"}]`, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}},
 		{"non-stdin value", "e1\n", []string{
 			"ack", "--consumer", "ci", "--events-from", "file.txt", "--state-dir", dir, handlerURL,
-		}},
-		{"full event-records envelope", `{"events":[{"id":"e1","kind":"revision"},{"id":"e2","kind":"revision"}]}`, []string{
-			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
 		}},
 	}
 	for _, tc := range tests {

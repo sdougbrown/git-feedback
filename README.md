@@ -143,7 +143,12 @@ sequence run without the flag still delivers them.
 ## Explicit acknowledgement
 
 `ack` acknowledges exactly the event IDs you supply, for that consumer and
-target, transactionally and idempotently. It is the only way an event stops
+target, transactionally and idempotently. Supply IDs with comma-separated
+`--event` values or `--events-from -`, which reads stdin as one ID per line, a
+JSON array of ID strings or event records, or a full `inbox` or `wait` envelope
+(each record contributes its `id`; `has_more: true` is a usage error — ack a
+complete page). Piping `wait` or `inbox` output straight into `ack` needs no
+`--ids-only` step. It is the only way an event stops
 being pending for a consumer. **Acknowledgements are delivery receipts, not
 triage dispositions**: acknowledging an event records that a consumer received
 it. It does not record that a finding was triaged, a thread resolved, a fix is

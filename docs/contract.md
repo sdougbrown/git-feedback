@@ -61,10 +61,13 @@ Every subcommand writes exactly one JSON value to stdout. Go types live in
   instead of full event records; acknowledgement and cursor semantics are
   unchanged.
 - `ack` accepts comma-separated `--event` values and `--events-from -`, which
-  reads IDs from stdin as one ID per line, a JSON array of ID strings, or the
-  full `inbox --ids-only` envelope. A form that yields zero IDs is a usage
-  error. The ack result lists the acknowledged event IDs in `events`. An
-  envelope with `has_more: true` is a usage error: ack a complete page.
+  reads IDs from stdin as one ID per line, a JSON array of ID strings or event
+  records, or a full `inbox` or `wait` result envelope whose `events` array
+  holds ID strings or event records. An event record contributes its `id`
+  field; a record without a string `id`, or an item that is neither an ID
+  string nor an event record, is a usage error. A form that yields zero IDs is
+  a usage error. The ack result lists the acknowledged event IDs in `events`.
+  An envelope with `has_more: true` is a usage error: ack a complete page.
   An event ID not matching `^e[0-9]+$` is a usage error (exit 2) naming the
   expected form; `unknown_event` is reserved for well-formed IDs that are
   not in the stream.
