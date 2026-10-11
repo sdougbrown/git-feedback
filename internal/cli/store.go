@@ -48,7 +48,7 @@ func handleStoreReset(ctx context.Context, inv Invocation) (Result, error) {
 	if raw := inv.Flags["target"]; raw == "" {
 		removed, err := store.Reset(dir)
 		if err != nil {
-			return r, wrapStoreOpenError(err)
+			return r, mapStoreError(err)
 		}
 		r.Store.Removed = removed
 		r.Status = StatusUnchanged

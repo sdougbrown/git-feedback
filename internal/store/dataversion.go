@@ -22,18 +22,13 @@ const SupportedDataVersion = 2
 // data versioning (no data_version row).
 const legacyDataVersion = 1
 
-// versionDB is satisfied by both *sql.DB and *sql.Tx, so the data version
-// checks can run inside the open migration transaction or standalone.
-type versionDB interface {
-	Exec(query string, args ...any) (sql.Result, error)
-	QueryRow(query string, args ...any) *sql.Row
-}
-
 // seedDataVersion ensures the data_version table exists and, for a store
 // created fresh by this Open, stamps it with the supported data version.
 // A pre-existing store is left untouched so the data version check can
-// refuse it rather than re-baseline it.
-func seedDataVersion(tx versionDB, fresh bool) error {
+// refuse it rather than re-baseline it. Both seed and check run inside
+// the open migration transaction, so a refusal leaves the store exactly
+// as it was.
+func seedDataVersion(tx *sql.Tx, fresh bool) error {
 	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS data_version (version INTEGER NOT NULL)`); err != nil {
 		return &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("prepare data_version: %v", err)}
 	}
@@ -51,14 +46,14 @@ func seedDataVersion(tx versionDB, fresh bool) error {
 // predates the changed fingerprint, author, and attribution rules, and a
 // newer version was written by a newer binary. Neither case is migrated or
 // re-baselined; the message names the store path and the remedy.
-func checkDataVersion(q versionDB, path string) error {
+func checkDataVersion(tx *sql.Tx, path string) error {
 	var rows int
-	if err := q.QueryRow(`SELECT count(*) FROM data_version`).Scan(&rows); err != nil {
+	if err := tx.QueryRow(`SELECT count(*) FROM data_version`).Scan(&rows); err != nil {
 		return &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("read data_version: %v", err)}
 	}
 	version := legacyDataVersion
 	if rows > 0 {
-		if err := q.QueryRow(`SELECT COALESCE(MAX(version), ?) FROM data_version`, legacyDataVersion).Scan(&version); err != nil {
+		if err := tx.QueryRow(`SELECT COALESCE(MAX(version), ?) FROM data_version`, legacyDataVersion).Scan(&version); err != nil {
 			return &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("read data_version: %v", err)}
 		}
 	}
