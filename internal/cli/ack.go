@@ -91,6 +91,13 @@ func resolveAckEventIDs(inv Invocation) ([]string, error) {
 			out = append(out, id)
 		}
 	}
+	// A malformed ID is a caller mistake, not a stream lookup miss, so
+	// reject it as a usage error before the store sees it.
+	for _, id := range out {
+		if !store.ValidEventID(id) {
+			return nil, &usageError{fmt.Sprintf("invalid event ID %q: expected e<digits>", id)}
+		}
+	}
 	return out, nil
 }
 

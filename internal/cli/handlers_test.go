@@ -561,7 +561,7 @@ func TestAckRejectsUnknownID(t *testing.T) {
 
 	// One known ID plus one unknown ID rejects the whole request.
 	code, env, _ := runCLI(t, []string{
-		"ack", "--consumer", "ci", "--event=e1", "--event=bogus", "--state-dir", dir, handlerURL,
+		"ack", "--consumer", "ci", "--event=e1", "--event=e999", "--state-dir", dir, handlerURL,
 	})
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
@@ -677,6 +677,43 @@ func assertAckReceipt(t *testing.T, env map[string]any, want ...string) {
 		if raw[i] != w {
 			t.Errorf("events[%d] = %v, want %q", i, raw[i], w)
 		}
+	}
+}
+
+func TestAckMalformedIDIsUsage(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+	tests := []struct {
+		name    string
+		argv    []string
+		stdin   string
+		wantMsg string
+	}{
+		{"embedded flag", []string{"ack", "--consumer", "ci", "--event=e3\n--event=e4", "--state-dir", dir, handlerURL}, "", "e3\\n--event=e4"},
+		{"internal whitespace", []string{"ack", "--consumer", "ci", "--event=e3 e4", "--state-dir", dir, handlerURL}, "", "e3 e4"},
+		{"flag-shaped value", []string{"ack", "--consumer", "ci", "--event=--event=e4", "--state-dir", dir, handlerURL}, "", "--event=e4"},
+		{"missing digits", []string{"ack", "--consumer", "ci", "--event=e", "--state-dir", dir, handlerURL}, "", "e"},
+		{"negative digits", []string{"ack", "--consumer", "ci", "--event=e-3", "--state-dir", dir, handlerURL}, "", "e-3"},
+		{"stdin malformed", []string{"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL}, "e1\nbogus\n", "bogus"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.stdin != "" {
+				withStdin(t, tc.stdin)
+			}
+			code, env, _ := runCLI(t, tc.argv)
+			if code != 2 {
+				t.Fatalf("exit = %d, want 2 (%v)", code, env["error"])
+			}
+			assertContract(t, env)
+			errMap := env["error"].(map[string]any)
+			if errMap["code"] != "usage" {
+				t.Errorf("error = %v, want usage", errMap)
+			}
+			if msg, _ := errMap["message"].(string); !strings.Contains(msg, tc.wantMsg) || !strings.Contains(msg, "e<digits>") {
+				t.Errorf("message %q does not contain offending ID %q and expected form e<digits>", msg, tc.wantMsg)
+			}
+		})
 	}
 }
 
