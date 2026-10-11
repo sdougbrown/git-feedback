@@ -141,6 +141,21 @@ func TestStoreResetTargetScoped(t *testing.T) {
 	if !ok || targetObj["id"] != handlerTarget().ID {
 		t.Errorf("store.target = %v, want id %q", storeObj["target"], handlerTarget().ID)
 	}
+	if targetObj["url"] != handlerTarget().URL {
+		t.Errorf("store.target.url = %v, want %q", targetObj["url"], handlerTarget().URL)
+	}
+	if targetObj["forge"] != handlerTarget().Forge {
+		t.Errorf("store.target.forge = %v, want %q", targetObj["forge"], handlerTarget().Forge)
+	}
+	if targetObj["host"] != handlerTarget().Host {
+		t.Errorf("store.target.host = %v, want %q", targetObj["host"], handlerTarget().Host)
+	}
+	if targetObj["repo"] != handlerTarget().Repo {
+		t.Errorf("store.target.repo = %v, want %q", targetObj["repo"], handlerTarget().Repo)
+	}
+	if targetObj["number"] != float64(handlerTarget().Number) {
+		t.Errorf("store.target.number = %v, want %d", targetObj["number"], handlerTarget().Number)
+	}
 	if storeObj["removed"] != true {
 		t.Errorf("store.removed = %v, want true", storeObj["removed"])
 	}
