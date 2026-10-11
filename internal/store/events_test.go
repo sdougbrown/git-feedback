@@ -39,6 +39,7 @@ func TestParseEventID(t *testing.T) {
 		{"e-3", 0, false},
 		{"e1x", 0, false},
 		{"x1", 0, false},
+		{"e0001", 1, false},
 		{"", 0, false},
 	}
 	for _, tc := range tests {

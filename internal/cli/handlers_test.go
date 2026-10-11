@@ -684,16 +684,17 @@ func TestAckMalformedIDIsUsage(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")
 	tests := []struct {
-		name  string
-		argv  []string
-		stdin string
+		name    string
+		argv    []string
+		stdin   string
+		wantMsg string
 	}{
-		{"embedded flag", []string{"ack", "--consumer", "ci", "--event=e3\n--event=e4", "--state-dir", dir, handlerURL}, ""},
-		{"internal whitespace", []string{"ack", "--consumer", "ci", "--event=e3 e4", "--state-dir", dir, handlerURL}, ""},
-		{"flag-shaped value", []string{"ack", "--consumer", "ci", "--event=--event=e4", "--state-dir", dir, handlerURL}, ""},
-		{"missing digits", []string{"ack", "--consumer", "ci", "--event=e", "--state-dir", dir, handlerURL}, ""},
-		{"negative digits", []string{"ack", "--consumer", "ci", "--event=e-3", "--state-dir", dir, handlerURL}, ""},
-		{"stdin malformed", []string{"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL}, "e1\nbogus\n"},
+		{"embedded flag", []string{"ack", "--consumer", "ci", "--event=e3\n--event=e4", "--state-dir", dir, handlerURL}, "", "e3\\n--event=e4"},
+		{"internal whitespace", []string{"ack", "--consumer", "ci", "--event=e3 e4", "--state-dir", dir, handlerURL}, "", "e3 e4"},
+		{"flag-shaped value", []string{"ack", "--consumer", "ci", "--event=--event=e4", "--state-dir", dir, handlerURL}, "", "--event=e4"},
+		{"missing digits", []string{"ack", "--consumer", "ci", "--event=e", "--state-dir", dir, handlerURL}, "", "e"},
+		{"negative digits", []string{"ack", "--consumer", "ci", "--event=e-3", "--state-dir", dir, handlerURL}, "", "e-3"},
+		{"stdin malformed", []string{"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL}, "e1\nbogus\n", "bogus"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -709,8 +710,8 @@ func TestAckMalformedIDIsUsage(t *testing.T) {
 			if errMap["code"] != "usage" {
 				t.Errorf("error = %v, want usage", errMap)
 			}
-			if msg, _ := errMap["message"].(string); !strings.Contains(msg, "e<digits>") {
-				t.Errorf("message %q does not name the expected form e<digits>", msg)
+			if msg, _ := errMap["message"].(string); !strings.Contains(msg, tc.wantMsg) || !strings.Contains(msg, "e<digits>") {
+				t.Errorf("message %q does not contain offending ID %q and expected form e<digits>", msg, tc.wantMsg)
 			}
 		})
 	}
