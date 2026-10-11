@@ -986,6 +986,9 @@ func TestAckEventsFromTruncatedEnvelope(t *testing.T) {
 	if env["error"].(map[string]any)["code"] != "usage" {
 		t.Errorf("error = %v, want usage", env["error"])
 	}
+	if msg, _ := env["error"].(map[string]any)["message"].(string); !strings.Contains(msg, "has_more: true") || !strings.Contains(msg, "rerun inbox or wait with a larger --limit") {
+		t.Errorf("error message = %q, want has_more: true and paging guidance", msg)
+	}
 	// Nothing was acknowledged.
 	if n := pendingCount(t, st); n != 4 {
 		t.Errorf("pending events = %d, want 4 after rejected truncated ack", n)
