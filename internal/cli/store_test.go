@@ -296,6 +296,35 @@ func TestStoreResetTargetStatFailure(t *testing.T) {
 	}
 }
 
+// TestStoreResetStatFailure verifies that a non-IsNotExist stat failure
+// inside store.Reset itself (full reset, no --target) maps to the stable
+// store code rather than an internal error.
+func TestStoreResetStatFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires non-root to trigger permission-denied stat")
+	}
+	dir, st, _ := handlerEnv(t)
+	if err := st.Close(); err != nil {
+		t.Fatalf("close seed store: %v", err)
+	}
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+
+	code, env, _ := runCLI(t, []string{"store", "reset", "--state-dir", dir})
+	if code != ExitOperational {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	errObj, ok := env["error"].(map[string]any)
+	if !ok || errObj["code"] != store.CodeStore {
+		t.Fatalf("error envelope = %v, want code %s", env["error"], store.CodeStore)
+	}
+	if msg, _ := errObj["message"].(string); !strings.Contains(msg, dir) {
+		t.Errorf("error message %q does not name the store path", msg)
+	}
+}
+
 // TestStoreUsageErrors verifies the caller-error surface of the store
 // command: a missing or unknown subcommand, a stray URL positional, and an
 // unparseable --target URL all exit 2 with a usage envelope.
