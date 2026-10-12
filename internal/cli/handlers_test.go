@@ -952,34 +952,41 @@ func TestAckEventsFromUsageErrors(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")
 	tests := []struct {
-		name  string
-		stdin string
-		argv  []string
+		name    string
+		stdin   string
+		argv    []string
+		wantMsg string
 	}{
 		{"empty stdin", "", []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
-		}},
+		}, "read no event IDs from stdin"},
 		{"blank stdin", "\n  \n", []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
-		}},
+		}, "read no event IDs from stdin"},
 		{"zero-id json array", "[]", []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
-		}},
+		}, "read no event IDs from stdin"},
 		{"array item that is neither an ID string nor a record", "[\"e1\", 2]", []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
-		}},
+		}, "neither an ID string nor an event record"},
 		{"record without id", `{"events":[{"id":"e1"},{"kind":"revision"}]}`, []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
-		}},
+		}, `record without an "id" field`},
 		{"record with non-string id", `{"events":[{"id":1}]}`, []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
-		}},
+		}, `"id" is not a string`},
 		{"array item without id field", `["e1", {"kind":"revision"}]`, []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
-		}},
+		}, `record without an "id" field`},
 		{"non-stdin value", "e1\n", []string{
 			"ack", "--consumer", "ci", "--events-from", "file.txt", "--state-dir", dir, handlerURL,
-		}},
+		}, "only supports '-' (stdin)"},
+		{"truncated json array", `[{"id":"e1",`, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}, "not a JSON array of IDs or event records"},
+		{"truncated envelope", `{"events":["e1",`, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}, "not a result envelope"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -990,6 +997,9 @@ func TestAckEventsFromUsageErrors(t *testing.T) {
 			}
 			if env["error"].(map[string]any)["code"] != "usage" {
 				t.Errorf("error = %v, want usage", env["error"])
+			}
+			if msg, _ := env["error"].(map[string]any)["message"].(string); !strings.Contains(msg, tc.wantMsg) {
+				t.Errorf("message %q does not contain %q", msg, tc.wantMsg)
 			}
 		})
 	}
