@@ -378,6 +378,85 @@ func TestWaitSkipEmptyReviews(t *testing.T) {
 	})
 }
 
+// TestWaitSkipHeadChanged: target head_changed events are delivered by
+// default; SkipHeadChanged skips them at delivery while feedback events
+// still deliver. The backlog is delivered without running a cycle, so no
+// bootstrap lease is needed.
+func TestWaitSkipHeadChanged(t *testing.T) {
+	e := newEnvAt(t, baseTime)
+
+	target, err := github.ParseTarget(testURL)
+	if err != nil {
+		t.Fatalf("parse target: %v", err)
+	}
+	snap := func(head string, end time.Time) *forge.Snapshot {
+		return &forge.Snapshot{
+			Head:           head,
+			CollectedStart: baseTime.Add(-time.Minute),
+			CollectedEnd:   end,
+			Reviews:        []forge.Review{{ID: "R1", Author: "rev", Body: "looks good", State: "APPROVED"}},
+		}
+	}
+	for _, p := range []struct {
+		head string
+		end  time.Time
+	}{{"h1", baseTime}, {"h2", baseTime.Add(time.Minute)}} {
+		if _, err := e.st.Publish(context.Background(), store.PublishInput{
+			Target:   target,
+			Account:  "alice",
+			Snapshot: snap(p.head, p.end),
+		}); err != nil {
+			t.Fatalf("publish: %v", err)
+		}
+	}
+
+	t.Run("default delivers the head_changed event", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		res, err := runWait(t, e, WaitInput{URL: testURL, Consumer: "watcher"}, ctx, 5*time.Second)
+		if err != nil {
+			t.Fatalf("wait: %v", err)
+		}
+		if res.Status != StatusEvents {
+			t.Fatalf("wait status = %s, want events", res.Status)
+		}
+		// Target + R1 + head_changed = 3.
+		if len(res.Events) != 3 {
+			t.Fatalf("events = %d, want 3 (target + review + head_changed)", len(res.Events))
+		}
+		var hasHead bool
+		for _, ev := range res.Events {
+			if ev.Kind == "head_changed" && ev.ObjectKind == "target" {
+				hasHead = true
+			}
+		}
+		if !hasHead {
+			t.Error("head_changed event not delivered by default")
+		}
+	})
+
+	t.Run("SkipHeadChanged skips the head_changed event", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		res, err := runWait(t, e, WaitInput{URL: testURL, Consumer: "watcher2", SkipHeadChanged: true}, ctx, 5*time.Second)
+		if err != nil {
+			t.Fatalf("wait: %v", err)
+		}
+		if res.Status != StatusEvents {
+			t.Fatalf("wait status = %s, want events", res.Status)
+		}
+		// head_changed skipped: target + R1 = 2.
+		if len(res.Events) != 2 {
+			t.Fatalf("events = %d, want 2 (target + review)", len(res.Events))
+		}
+		for _, ev := range res.Events {
+			if ev.Kind == "head_changed" && ev.ObjectKind == "target" {
+				t.Error("head_changed event delivered under SkipHeadChanged")
+			}
+		}
+	})
+}
+
 // TestWaitDeliversEventsAppendedByOwnCycle: a cycle whose collection
 // publishes a snapshot exits with the appended events instead of sleeping
 // on the cadence.

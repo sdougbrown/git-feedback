@@ -42,6 +42,10 @@ type InboxInput struct {
 	// (APPROVED, CHANGES_REQUESTED, DISMISSED) and reviews absent from the
 	// snapshot body (not_observed events) are always delivered.
 	SkipEmptyReviews bool
+	// SkipHeadChanged, when true, filters out target head_changed events:
+	// synthetic target events that track the collected head. The filter is a
+	// pure event-kind check at delivery; skipped events stay pending.
+	SkipHeadChanged bool
 }
 
 // emptyReview reports whether a review is a content-free COMMENTED container:
@@ -172,11 +176,12 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 		where += ` AND (e.author = '' OR e.author != ?)`
 		args = append(args, excludeAuthor)
 	}
-	// Without the empty-review filter the SQL row limit bounds the scan at
-	// limit+1 deliverable rows; with it, emptiness lives in the snapshot
-	// body, so filtering happens after the scan and the row limit moves into
-	// the scan loop below.
-	if !in.SkipEmptyReviews {
+	// Without a delivery-time filter the SQL row limit bounds the scan at
+	// limit+1 deliverable rows; with one, filtering happens after the scan
+	// (emptiness lives in the snapshot body, skipped kinds cost rows) and the
+	// row limit moves into the scan loop below.
+	filtered := in.SkipEmptyReviews || in.SkipHeadChanged
+	if !filtered {
 		args = append(args, limit+1)
 	}
 	query := `
@@ -185,7 +190,7 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 		LEFT JOIN acks a ON a.event_id = e.id AND a.consumer = ? AND a.stream_id = e.stream_id
 		` + where + `
 		ORDER BY e.id ASC`
-	if !in.SkipEmptyReviews {
+	if !filtered {
 		query += ` LIMIT ?`
 	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -226,6 +231,9 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 	reviewContents := map[int64]map[string][2]string{}
 	deliverable := 0
 	for _, ev := range candidates {
+		if in.SkipHeadChanged && ev.Kind == KindHeadChanged && ev.ObjectKind == objectKindTarget {
+			continue
+		}
 		if in.SkipEmptyReviews {
 			skip, ferr := s.emptyReviewEvent(ctx, ev, parseSnapshotSeq(ev.SnapshotID), reviewContents)
 			if ferr != nil {
@@ -241,7 +249,7 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 		// once limit+1 deliverable events are in hand (the (limit+1)-th
 		// stays pending and is re-read on the next page, as without the
 		// filter).
-		if in.SkipEmptyReviews && deliverable == limit+1 {
+		if filtered && deliverable == limit+1 {
 			break
 		}
 	}

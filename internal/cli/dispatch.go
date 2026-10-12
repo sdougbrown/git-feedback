@@ -90,7 +90,7 @@ var specs = map[string]commandSpec{
 		handle: handleAck,
 	},
 	"wait": {
-		flags:  []flagSpec{{"consumer", flagString}, {"timeout", flagString}, {"head", flagString}, {"limit", flagString}, {"exclude-self", flagBool}, {"skip-empty-reviews", flagBool}},
+		flags:  []flagSpec{{"consumer", flagString}, {"timeout", flagString}, {"head", flagString}, {"limit", flagString}, {"exclude-self", flagBool}, {"skip-empty-reviews", flagBool}, {"skip-head-changed", flagBool}},
 		handle: handleWait,
 	},
 }
