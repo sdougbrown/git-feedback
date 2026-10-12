@@ -46,6 +46,7 @@ func handleWait(ctx context.Context, inv Invocation) (Result, error) {
 		Limit:            limit,
 		ExcludeSelf:      inv.Bools["exclude-self"],
 		SkipEmptyReviews: inv.Bools["skip-empty-reviews"],
+		SkipHeadChanged:  inv.Bools["skip-head-changed"],
 	})
 	if err != nil {
 		return Result{}, mapReconcileError(err)

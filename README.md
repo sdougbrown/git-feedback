@@ -58,7 +58,7 @@ git-feedback reconcile <URL> [--head <SHA>] [--account <LOGIN>] [--state-dir <DI
 git-feedback snapshot <URL> --snapshot <ID> --output <FILE> [--account <LOGIN>] [--state-dir <DIR>] [--json]
 git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--exclude-self] [--skip-empty-reviews] [--json]
 git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--events-from -] [--account <LOGIN>] [--state-dir <DIR>] [--json]
-git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--skip-empty-reviews] [--json]
+git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--skip-empty-reviews] [--skip-head-changed] [--json]
 ```
 
 Every subcommand writes exactly one JSON envelope to stdout (see
@@ -139,6 +139,12 @@ recorded in the event's snapshot. Reviews with decision states (`APPROVED`,
 deliver. The filter applies only at delivery — the store, snapshots, and event
 rows are unchanged, and skipped events stay pending in the store, so a page
 sequence run without the flag still delivers them.
+
+Each head move emits a `head_changed` event for the target itself. `wait`
+delivers it by default; pass `--skip-head-changed` to skip it at delivery, so
+consumers that only want feedback events can keep a single event stream. The
+filter applies only at delivery — skipped events stay pending in the store, so
+a consumer running without the flag still receives them.
 
 ## Explicit acknowledgement
 

@@ -52,6 +52,9 @@ type WaitInput struct {
 	// an empty COMMENTED container (GitHub's inline-reply containers). The
 	// store classifies emptiness from the event's snapshot body at delivery.
 	SkipEmptyReviews bool
+	// SkipHeadChanged, when true, filters out target head_changed events at
+	// delivery; the events stay pending in the store.
+	SkipHeadChanged bool
 }
 
 // WaitResult is the terminal wait outcome: delivered events or the
@@ -290,6 +293,7 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 		Limit:            in.Limit,
 		ExcludeAuthor:    excludeAuthor,
 		SkipEmptyReviews: in.SkipEmptyReviews,
+		SkipHeadChanged:  in.SkipHeadChanged,
 	})
 	if err != nil {
 		var se *store.Error

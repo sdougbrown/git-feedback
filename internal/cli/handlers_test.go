@@ -555,6 +555,126 @@ func TestInboxSkipEmptyReviews(t *testing.T) {
 	})
 }
 
+// TestWaitSkipHeadChanged: target head_changed events are delivered by
+
+// default; --skip-head-changed skips them at delivery while feedback events
+
+// still deliver.
+
+func TestWaitSkipHeadChanged(t *testing.T) {
+
+	dir, st, _ := handlerEnv(t)
+
+	snap := func(head string, end time.Time) *forge.Snapshot {
+
+		return &forge.Snapshot{
+
+			Head: head,
+
+			CollectedStart: handlerBaseTime.Add(-time.Minute),
+
+			CollectedEnd: end,
+
+			Threads: []forge.Thread{{ID: "t1", Author: "rev", Body: "fix this", Path: "a.go"}},
+		}
+
+	}
+
+	for _, p := range []struct {
+		head string
+
+		end time.Time
+	}{{"headA", handlerBaseTime}, {"headB", handlerBaseTime.Add(time.Minute)}} {
+
+		if _, err := st.Publish(context.Background(), store.PublishInput{
+
+			Target: handlerTarget(), Account: "alice", Snapshot: snap(p.head, p.end),
+		}); err != nil {
+
+			t.Fatalf("publish: %v", err)
+
+		}
+
+	}
+
+	t.Run("default delivers the head_changed event", func(t *testing.T) {
+
+		code, env, _ := runCLI(t, []string{"wait", "--consumer", "ci", "--state-dir", dir, handlerURL})
+
+		if code != 0 {
+
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+
+		}
+
+		assertContract(t, env)
+
+		events := env["events"].([]any)
+
+		// 1 target initial + 1 thread + 1 head_changed = 3.
+
+		if len(events) != 3 {
+
+			t.Fatalf("events = %d, want 3 (target + thread + head_changed)", len(events))
+
+		}
+
+		var hasHead bool
+
+		for _, e := range events {
+
+			if m, ok := e.(map[string]any); ok && m["kind"] == "head_changed" && m["object_kind"] == "target" {
+
+				hasHead = true
+
+			}
+
+		}
+
+		if !hasHead {
+
+			t.Error("head_changed event not delivered by default")
+
+		}
+
+	})
+
+	t.Run("--skip-head-changed skips the head_changed event", func(t *testing.T) {
+
+		code, env, _ := runCLI(t, []string{"wait", "--consumer", "ci", "--skip-head-changed", "--state-dir", dir, handlerURL})
+
+		if code != 0 {
+
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+
+		}
+
+		assertContract(t, env)
+
+		events := env["events"].([]any)
+
+		// head_changed skipped: 1 target + 1 thread = 2.
+
+		if len(events) != 2 {
+
+			t.Fatalf("events = %d, want 2 (target + thread)", len(events))
+
+		}
+
+		for _, e := range events {
+
+			if m, ok := e.(map[string]any); ok && m["kind"] == "head_changed" && m["object_kind"] == "target" {
+
+				t.Error("head_changed event delivered under --skip-head-changed")
+
+			}
+
+		}
+
+	})
+
+}
+
 func TestAckRejectsUnknownID(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")
