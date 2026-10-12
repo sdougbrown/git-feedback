@@ -7,7 +7,9 @@ modes side by side. It is the reference for harnesses that drive
 
 ## Result contract
 
-Every subcommand writes exactly one JSON value to stdout. Go types live in
+Every subcommand writes exactly one JSON value to stdout. The one exception:
+`--help` (top level, or on the store command) prints plain help text and exits
+0. Go types live in
 `internal/cli/result.go`.
 
 ```json
