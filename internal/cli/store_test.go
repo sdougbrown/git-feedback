@@ -187,18 +187,7 @@ func TestLegacyStoreRefusedByCommands(t *testing.T) {
 	if code != ExitOperational {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
-	var envelope map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
-		t.Fatalf("stdout is not one JSON value: %v (%q)", err, stdout.String())
-	}
-	errObj, ok := envelope["error"].(map[string]any)
-	if !ok || errObj["code"] != store.CodeStoreDataOlder {
-		t.Fatalf("error envelope = %v, want code %s", envelope["error"], store.CodeStoreDataOlder)
-	}
-	msg, _ := errObj["message"].(string)
-	if !strings.Contains(msg, filepath.Join(dir, "feedback.db")) || !strings.Contains(msg, "store reset") {
-		t.Errorf("message %q does not name the path and remedy", msg)
-	}
+	assertDataOlderRefusal(t, stdout, dir)
 
 	// The remedy: a full reset never opens the store, so it works here.
 	code, env, _ := runCLI(t, []string{"store", "reset", "--state-dir", dir})
@@ -225,18 +214,7 @@ func TestStoreResetTargetOnRefusedStore(t *testing.T) {
 	if code != ExitOperational {
 		t.Fatalf("exit code = %d, want 1", code)
 	}
-	var envelope map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
-		t.Fatalf("stdout is not one JSON value: %v (%q)", err, stdout.String())
-	}
-	errObj, ok := envelope["error"].(map[string]any)
-	if !ok || errObj["code"] != store.CodeStoreDataOlder {
-		t.Fatalf("error envelope = %v, want code %s", envelope["error"], store.CodeStoreDataOlder)
-	}
-	msg, _ := errObj["message"].(string)
-	if !strings.Contains(msg, filepath.Join(dir, "feedback.db")) || !strings.Contains(msg, "store reset") {
-		t.Errorf("message %q does not name the path and remedy", msg)
-	}
+	assertDataOlderRefusal(t, stdout, dir)
 }
 
 // TestStoreResetTargetUnknownStream verifies that resetting a target with no
@@ -367,6 +345,53 @@ func TestStoreResetStatFailure(t *testing.T) {
 	}
 	if msg, _ := errObj["message"].(string); !strings.Contains(msg, dir) {
 		t.Errorf("error message %q does not name the store path", msg)
+	}
+}
+
+// assertDataOlderRefusal decodes the envelope and asserts the
+// store_data_older refusal: the error code, and a message naming the store
+// path and the store reset remedy.
+func assertDataOlderRefusal(t *testing.T, stdout bytes.Buffer, dir string) {
+	var envelope map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("stdout is not one JSON value: %v (%q)", err, stdout.String())
+	}
+	errObj, ok := envelope["error"].(map[string]any)
+	if !ok || errObj["code"] != store.CodeStoreDataOlder {
+		t.Fatalf("error envelope = %v, want code %s", envelope["error"], store.CodeStoreDataOlder)
+	}
+	msg, _ := errObj["message"].(string)
+	if !strings.Contains(msg, filepath.Join(dir, "feedback.db")) || !strings.Contains(msg, "store reset") {
+		t.Errorf("message %q does not name the path and remedy", msg)
+	}
+}
+
+// TestStoreResetRemoveFailure verifies that a remove failure inside
+// store.Reset (state dir readable but not writable) surfaces the stable
+// store code with the failing path in the message.
+func TestStoreResetRemoveFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires non-root to trigger permission-denied remove")
+	}
+	dir, st, _ := handlerEnv(t)
+	if err := st.Close(); err != nil {
+		t.Fatalf("close seed store: %v", err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+
+	code, env, _ := runCLI(t, []string{"store", "reset", "--state-dir", dir})
+	if code != ExitOperational {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	errObj, ok := env["error"].(map[string]any)
+	if !ok || errObj["code"] != store.CodeStore {
+		t.Fatalf("error envelope = %v, want code %s", env["error"], store.CodeStore)
+	}
+	if msg, _ := errObj["message"].(string); !strings.Contains(msg, filepath.Join(dir, store.DBFilename)) {
+		t.Errorf("error message %q does not name the failing path", msg)
 	}
 }
 
