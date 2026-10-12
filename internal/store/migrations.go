@@ -63,8 +63,8 @@ var knownTables = []string{
 
 // migrate applies pending embedded migrations transactionally. It refuses a
 // newer-than-supported schema and never deletes or recreates an existing
-// store.
-func migrate(db *sql.DB) error {
+// store. path is the database file path, used only in error messages.
+func migrate(db *sql.DB, path string) error {
 	ms, supported, err := discoverMigrations()
 	if err != nil {
 		return err
@@ -95,6 +95,8 @@ func migrate(db *sql.DB) error {
 		return &Error{Code: CodeStoreCorrupt, Message: "schema_version without store tables"}
 	}
 
+	fresh := hasVersion == 0 && hasTables == 0
+
 	current := 0
 	if hasVersion > 0 {
 		if err := tx.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`).Scan(&current); err != nil {
@@ -103,8 +105,10 @@ func migrate(db *sql.DB) error {
 	}
 	if current > supported {
 		return &Error{
-			Code:    CodeStoreNewer,
-			Message: fmt.Sprintf("store schema version %d is newer than supported version %d", current, supported),
+			Code: CodeStoreNewer,
+			Message: fmt.Sprintf(
+				"store schema version %d is newer than supported version %d; the store at %s was written by a newer git-feedback; delete it (or run `git-feedback store reset`) to continue",
+				current, supported, path),
 		}
 	}
 	for _, m := range ms {
@@ -120,6 +124,15 @@ func migrate(db *sql.DB) error {
 		if _, err := tx.Exec(`INSERT INTO schema_version (version) VALUES (?)`, m.version); err != nil {
 			return &Error{Code: CodeStore, Message: fmt.Sprintf("record migration %s: %v", m.name, err)}
 		}
+	}
+	// The data version is independent of the SQL schema: it is stamped on
+	// fresh stores and checked for every store, inside this transaction so a
+	// refusal leaves the store exactly as it was.
+	if err := seedDataVersion(tx, fresh); err != nil {
+		return err
+	}
+	if err := checkDataVersion(tx, path); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return &Error{Code: CodeStore, Message: fmt.Sprintf("commit migrations: %v", err)}

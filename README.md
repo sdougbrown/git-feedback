@@ -59,6 +59,8 @@ git-feedback snapshot <URL> --snapshot <ID> --output <FILE> [--account <LOGIN>] 
 git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--exclude-self] [--skip-empty-reviews] [--json]
 git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--events-from -] [--account <LOGIN>] [--state-dir <DIR>] [--json]
 git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--skip-empty-reviews] [--skip-head-changed] [--json]
+git-feedback store path [--state-dir <DIR>]
+git-feedback store reset [--target <URL>] [--state-dir <DIR>]
 ```
 
 Every subcommand writes exactly one JSON envelope to stdout (see
@@ -82,11 +84,45 @@ the envelope.
   operation.
 - `wait` — bounded waiting. It owns polling only when used standalone; a
   controller uses `reconcile` and `inbox` instead.
+- `store` — store lifecycle. `store path` prints the resolved store directory
+  without opening it. `store reset` deletes the store (the database files in
+  the state directory); with `--target <URL>` only that target's streams,
+  snapshots, events, attempts, and acknowledgements are deleted, while other
+  targets and host-scoped state survive. Reset is the documented remedy when
+  the tool refuses a store (see "The store is a disposable cache" below).
+
+## The store is a disposable cache
+
+The store exists only to deduplicate and replay feedback between runs; it is
+not a production database and nothing depends on it surviving. Its default
+location is `os.UserConfigDir()/git-feedback/state`, which resolves to:
+
+- macOS: `~/Library/Application Support/git-feedback/state`
+- Linux: `~/.config/git-feedback/state` (or `$XDG_CONFIG_HOME/git-feedback/state`)
+- Windows: `%AppData%\git-feedback\state`
+
+`git-feedback store path` prints the exact path for the current environment
+(including any `--state-dir` override). Deleting the store is always safe, but
+it has a cost: consumers lose their acknowledgements, so previously delivered
+events may be delivered again, and the next collection is a new baseline —
+every visible feedback object is re-emitted as `initial_observation`.
+
+The store carries a data version alongside its SQL schema version. The data
+version tracks the meaning of stored values — fingerprint inputs, author
+normalization, and attribution rules — not just table layout. From v0.4.0 on,
+`git-feedback` refuses to open a store whose data version is older than the
+one it supports (stores written before data versioning count as version 1):
+the refusal names the store path and the remedy — delete it, or run
+`git-feedback store reset`. The tool never silently re-baselines an old store,
+because reinterpreting old rows under new rules would fabricate events. The
+same refusal, with the same remedy in the message, applies to a store written
+by a newer release.
 
 ## Shared state and account scope
 
 `--state-dir <DIR>` selects one shared SQLite store. The default is
-`os.UserConfigDir()/git-feedback/state`. Separate stores cannot deduplicate each
+`os.UserConfigDir()/git-feedback/state` (see the per-OS paths above). Separate
+stores cannot deduplicate each
 other.
 
 Observations are partitioned by authenticated account and host. Different

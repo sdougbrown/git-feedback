@@ -243,7 +243,7 @@ func TestEnvelopeFields(t *testing.T) {
 			for _, key := range []string{
 				"schema", "command", "status", "target", "account", "observed_head",
 				"expected_head", "snapshot", "attempt", "freshness", "reviewer_completion",
-				"events", "has_more", "next_cursor", "export", "error",
+				"events", "has_more", "next_cursor", "export", "store", "error",
 			} {
 				if _, ok := envelope[key]; !ok {
 					t.Errorf("%s: missing contract field %q", tc.name, key)
@@ -287,6 +287,7 @@ func TestEnvelopeFields(t *testing.T) {
 		},
 		Attempt: &Attempt{At: "at", OK: true, Complete: true, NextDue: "nd"},
 		Export:  &Export{Path: "p", Digest: "d", Counts: map[string]int{}},
+		Store:   &StoreInfo{Path: "sp", Removed: true},
 		Error:   &Error{Code: "c", Message: "m", Retryable: true},
 	}
 	var buf bytes.Buffer
@@ -302,6 +303,7 @@ func TestEnvelopeFields(t *testing.T) {
 		"snapshot":  {"id", "collected_start", "collected_end", "complete", "object_counts"},
 		"attempt":   {"at", "ok", "complete", "error_code", "next_due"},
 		"export":    {"path", "digest", "counts"},
+		"store":     {"path", "target", "removed"},
 		"error":     {"code", "message", "retryable"},
 		"freshness": {"snapshot_observed_at", "stale"},
 	}

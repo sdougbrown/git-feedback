@@ -575,7 +575,7 @@ func TestWaitStoreOpenErrorPlumbing(t *testing.T) {
 	e := newEnv(t)
 	e.eng.Clock = nil // real clock: the retry backoff actually elapses
 
-	for _, code := range []string{store.CodeStoreCorrupt, store.CodeStoreNewer} {
+	for _, code := range []string{store.CodeStoreCorrupt, store.CodeStoreNewer, store.CodeStoreDataOlder} {
 		t.Run(code+" fails fast", func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 			defer cancel()

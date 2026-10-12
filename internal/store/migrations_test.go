@@ -34,8 +34,16 @@ func TestRefuseNewerSchema(t *testing.T) {
 	if !ok || se.Code != CodeStoreNewer {
 		t.Fatalf("error = %v, want code %s", err, CodeStoreNewer)
 	}
+	// The message must name the store path and the remedy.
+	wantPath := filepath.Join(dir, DBFilename)
+	if !strings.Contains(se.Message, wantPath) {
+		t.Errorf("message %q does not name the store path %q", se.Message, wantPath)
+	}
+	if !strings.Contains(se.Message, "store reset") {
+		t.Errorf("message %q does not name the remedy", se.Message)
+	}
 	// The store must survive untouched.
-	if _, err := os.Stat(filepath.Join(dir, dbFilename)); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, DBFilename)); err != nil {
 		t.Fatalf("store file missing after refusal: %v", err)
 	}
 }
@@ -50,7 +58,7 @@ func TestOpenLockedStoreIsRetriable(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	path := filepath.Join(dir, dbFilename)
+	path := filepath.Join(dir, DBFilename)
 	if err := os.WriteFile(path, []byte("existing store data"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -93,7 +101,7 @@ func TestOpenLockedStoreRealBusyIsRetriable(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	path := filepath.Join(dir, dbFilename)
+	path := filepath.Join(dir, DBFilename)
 
 	// Connection A holds the WAL write lock. A single serialized connection
 	// keeps BEGIN IMMEDIATE and the write on the same underlying handle.
@@ -148,7 +156,7 @@ func TestMigrationSelfIdentityPreservesRows(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	path := filepath.Join(dir, dbFilename)
+	path := filepath.Join(dir, DBFilename)
 	db, err := sql.Open("sqlite", dsn(path, 5000))
 	if err != nil {
 		t.Fatalf("open raw db: %v", err)
@@ -173,6 +181,14 @@ func TestMigrationSelfIdentityPreservesRows(t *testing.T) {
 	}
 	if _, err := db.Exec(`INSERT INTO schema_version (version) VALUES (2)`); err != nil {
 		t.Fatalf("record version: %v", err)
+	}
+	// The store carries current data semantics, so the SQL migration path is
+	// what is under test; a store with no data version would be refused.
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS data_version (version INTEGER NOT NULL)`); err != nil {
+		t.Fatalf("data_version: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO data_version (version) VALUES (?)`, SupportedDataVersion); err != nil {
+		t.Fatalf("record data version: %v", err)
 	}
 	seed := []string{
 		`INSERT INTO targets (stream_id, target_id, account, host, target_json)
@@ -231,7 +247,7 @@ func TestRefuseCorruptStore(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	path := filepath.Join(dir, dbFilename)
+	path := filepath.Join(dir, DBFilename)
 	if err := os.WriteFile(path, []byte("this is not a SQLite database, just noise"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}

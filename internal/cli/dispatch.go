@@ -1,5 +1,5 @@
 // Package cli implements the git-feedback command boundary: argv parsing for
-// the five subcommands, the result envelope, and exit-code/signal plumbing.
+// the subcommands, the result envelope, and exit-code/signal plumbing.
 package cli
 
 import (
@@ -21,7 +21,10 @@ type handlerFunc func(ctx context.Context, inv Invocation) (Result, error)
 // Invocation carries one parsed subcommand invocation.
 type Invocation struct {
 	Command string
-	URL     string
+	// Sub is the nested subcommand for commands that have one (store path,
+	// store reset); empty otherwise.
+	Sub string
+	URL string
 	// Flags holds single-valued flag values by name; absent flags are "".
 	Flags map[string]string
 	// Bools holds boolean flags by name; absent flags are false.
@@ -93,6 +96,10 @@ var specs = map[string]commandSpec{
 		flags:  []flagSpec{{"consumer", flagString}, {"timeout", flagString}, {"head", flagString}, {"limit", flagString}, {"exclude-self", flagBool}, {"skip-empty-reviews", flagBool}, {"skip-head-changed", flagBool}},
 		handle: handleWait,
 	},
+	"store": {
+		flags:  []flagSpec{{"target", flagString}},
+		handle: handleStore,
+	},
 }
 
 // parseInvocation parses argv (without the program name) for one subcommand.
@@ -111,9 +118,24 @@ func parseInvocation(argv []string) (Invocation, error) {
 		return Invocation{}, &usageError{fmt.Sprintf("unknown subcommand %q", cmd)}
 	}
 
-	inv := Invocation{Command: cmd, Flags: map[string]string{}, Bools: map[string]bool{}, handler: spec.handle}
+	// The store command takes a nested subcommand instead of a URL:
+	// `store path` or `store reset [--target <URL>]`.
+	sub := ""
+	if cmd == "store" {
+		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+			return Invocation{}, &usageError{`store requires a subcommand: "path" or "reset"`}
+		}
+		sub = rest[0]
+		rest = rest[1:]
+		if sub != "path" && sub != "reset" {
+			return Invocation{}, &usageError{fmt.Sprintf("unknown store subcommand %q (want %q or %q)", sub, "path", "reset")}
+		}
+	}
 
-	urlFirst := len(rest) > 0 && !strings.HasPrefix(rest[0], "-")
+	inv := Invocation{Command: cmd, Sub: sub, Flags: map[string]string{}, Bools: map[string]bool{}, handler: spec.handle}
+
+	// The store command takes no URL positional; its arguments are flags only.
+	urlFirst := cmd != "store" && len(rest) > 0 && !strings.HasPrefix(rest[0], "-")
 	if urlFirst {
 		inv.URL = rest[0]
 		rest = rest[1:]
@@ -146,7 +168,12 @@ func parseInvocation(argv []string) (Invocation, error) {
 		return Invocation{}, &usageError{fmt.Sprintf("%s: %v", cmd, err)}
 	}
 
-	if urlFirst {
+	if cmd == "store" {
+		// The store command never takes a URL positional.
+		if fs.NArg() != 0 {
+			return Invocation{}, &usageError{fmt.Sprintf("%s: unexpected argument %q", cmd, fs.Arg(0))}
+		}
+	} else if urlFirst {
 		if fs.NArg() != 0 {
 			return Invocation{}, &usageError{fmt.Sprintf("%s: unexpected argument %q", cmd, fs.Arg(0))}
 		}

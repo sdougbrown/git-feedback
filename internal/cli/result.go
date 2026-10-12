@@ -59,6 +59,15 @@ type Freshness struct {
 	Stale              bool   `json:"stale"`
 }
 
+// StoreInfo reports the store subcommand's output: the resolved store path
+// and, for reset, the optional target scope and whether store content was
+// removed.
+type StoreInfo struct {
+	Path    string  `json:"path"`
+	Target  *Target `json:"target"`
+	Removed bool    `json:"removed"`
+}
+
 // Export reports the artifact written by the snapshot command.
 type Export struct {
 	Path   string         `json:"path"`
@@ -75,22 +84,23 @@ type Error struct {
 
 // Result is the single JSON value every subcommand writes to stdout.
 type Result struct {
-	Schema             string    `json:"schema"`
-	Command            string    `json:"command"`
-	Status             string    `json:"status"`
-	Target             *Target   `json:"target"`
-	Account            *string   `json:"account"`
-	ObservedHead       *string   `json:"observed_head"`
-	ExpectedHead       *string   `json:"expected_head"`
-	Snapshot           *Snapshot `json:"snapshot"`
-	Attempt            *Attempt  `json:"attempt"`
-	Freshness          Freshness `json:"freshness"`
-	ReviewerCompletion string    `json:"reviewer_completion"`
-	Events             []any     `json:"events"`
-	HasMore            bool      `json:"has_more"`
-	NextCursor         *string   `json:"next_cursor"`
-	Export             *Export   `json:"export"`
-	Error              *Error    `json:"error"`
+	Schema             string     `json:"schema"`
+	Command            string     `json:"command"`
+	Status             string     `json:"status"`
+	Target             *Target    `json:"target"`
+	Account            *string    `json:"account"`
+	ObservedHead       *string    `json:"observed_head"`
+	ExpectedHead       *string    `json:"expected_head"`
+	Snapshot           *Snapshot  `json:"snapshot"`
+	Attempt            *Attempt   `json:"attempt"`
+	Freshness          Freshness  `json:"freshness"`
+	ReviewerCompletion string     `json:"reviewer_completion"`
+	Events             []any      `json:"events"`
+	HasMore            bool       `json:"has_more"`
+	NextCursor         *string    `json:"next_cursor"`
+	Export             *Export    `json:"export"`
+	Store              *StoreInfo `json:"store"`
+	Error              *Error     `json:"error"`
 }
 
 // Write emits exactly one JSON value for r to w, applying the envelope

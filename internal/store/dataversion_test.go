@@ -1,0 +1,365 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sdougbrown/git-feedback/internal/forge"
+)
+
+// TestFreshStoreGetsDataVersion verifies that a store created by this binary
+// is stamped with the supported data version and opens cleanly.
+func TestFreshStoreGetsDataVersion(t *testing.T) {
+	st := openTestStore(t)
+	var version int
+	if err := st.db.QueryRow(`SELECT version FROM data_version`).Scan(&version); err != nil {
+		t.Fatalf("read data_version: %v", err)
+	}
+	if version != SupportedDataVersion {
+		t.Fatalf("data version = %d, want %d", version, SupportedDataVersion)
+	}
+}
+
+// TestRefuseLegacyStoreWithoutDataVersion verifies that a store created
+// before data versioning (no data_version row) is refused as data version 1,
+// with a message that names the store path and the remedy, and that no
+// re-baseline happens: the store stays refused on every open.
+func TestRefuseLegacyStoreWithoutDataVersion(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	st, err := Open(dir, Options{})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := st.db.Exec(`DELETE FROM data_version`); err != nil {
+		t.Fatalf("clear data_version: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	_, err = Open(dir, Options{})
+	if err == nil {
+		t.Fatal("open succeeded on legacy store, want refusal")
+	}
+	se, ok := err.(*Error)
+	if !ok || se.Code != CodeStoreDataOlder {
+		t.Fatalf("error = %v, want code %s", err, CodeStoreDataOlder)
+	}
+	wantPath := filepath.Join(dir, DBFilename)
+	if !strings.Contains(se.Message, wantPath) {
+		t.Errorf("message %q does not name the store path %q", se.Message, wantPath)
+	}
+	if !strings.Contains(se.Message, "store reset") {
+		t.Errorf("message %q does not name the remedy", se.Message)
+	}
+	if _, err := Open(dir, Options{}); err == nil {
+		t.Fatal("second open succeeded on legacy store, want refusal (no re-baseline)")
+	}
+}
+
+// TestRefuseUpgradeWithoutDataVersionTable verifies that a v0.3.0-layout
+// store — schema 2 with seeded rows but no data_version table — is
+// refused as the implicit data version 1 (store_data_older), that no
+// re-baseline happens, and that the refusal leaves the store exactly as
+// it was: the pending migrations are not committed (schema still 2, no
+// data_version table) and the seeded rows are intact.
+func TestRefuseUpgradeWithoutDataVersionTable(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "state")
+	st, err := Open(dir, Options{})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := st.Publish(ctx, PublishInput{
+		Target:  testTarget(),
+		Account: "alice",
+		Snapshot: mkSnapshot("head-1",
+			[]forge.Thread{{ID: "t1", Author: "rev", Body: "fix this", Path: "main.go"}},
+			nil, nil),
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	// Downgrade to the v0.3.0 layout: schema 2 (drop the 0003/0004
+	// artifacts) and no data_version table.
+	db, err := sql.Open("sqlite", filepath.Join(dir, DBFilename))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE events DROP COLUMN author`,
+		`ALTER TABLE objects DROP COLUMN author`,
+		`DROP INDEX snapshots_stream_idx`,
+		`UPDATE schema_version SET version = 2`,
+		`DROP TABLE data_version`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			db.Close()
+			t.Fatalf("downgrade %q: %v", stmt, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	// Refused as the pre-data-version store, naming the path and remedy.
+	_, err = Open(dir, Options{})
+	if err == nil {
+		t.Fatal("open succeeded on v0.3.0 store, want refusal")
+	}
+	se, ok := err.(*Error)
+	if !ok || se.Code != CodeStoreDataOlder {
+		t.Fatalf("error = %v, want code %s", err, CodeStoreDataOlder)
+	}
+	if !strings.Contains(se.Message, filepath.Join(dir, DBFilename)) {
+		t.Errorf("message %q does not name the store path", se.Message)
+	}
+	if !strings.Contains(se.Message, "store reset") {
+		t.Errorf("message %q does not name the remedy", se.Message)
+	}
+	// No re-baseline: the second open is refused the same way.
+	if _, err := Open(dir, Options{}); err == nil {
+		t.Fatal("second open succeeded on v0.3.0 store, want refusal")
+	}
+	// The refusal left the store untouched: the pending migrations were
+	// not committed (schema still 2, no data_version table) and the
+	// seeded rows are intact.
+	db, err = sql.Open("sqlite", filepath.Join(dir, DBFilename))
+	if err != nil {
+		t.Fatalf("reopen db: %v", err)
+	}
+	defer db.Close()
+	var version int
+	if err := db.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
+		t.Fatalf("read schema_version: %v", err)
+	}
+	if version != 2 {
+		t.Errorf("schema version = %d, want 2 (migrations must not commit before the refusal)", version)
+	}
+	var targets, snapshots int
+	if err := db.QueryRow(`SELECT count(*) FROM targets`).Scan(&targets); err != nil {
+		t.Fatalf("count targets: %v", err)
+	}
+	if targets != 1 {
+		t.Errorf("targets rows = %d, want 1", targets)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM snapshots`).Scan(&snapshots); err != nil {
+		t.Fatalf("count snapshots: %v", err)
+	}
+	if snapshots != 1 {
+		t.Errorf("snapshots rows = %d, want 1", snapshots)
+	}
+	var dvTables int
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='data_version'`).Scan(&dvTables); err != nil {
+		t.Fatalf("count data_version table: %v", err)
+	}
+	if dvTables != 0 {
+		t.Error("data_version table present after refused open, want absent")
+	}
+}
+
+// TestRefuseDataVersionMismatches verifies that an explicit older data
+// version is refused as store_data_older and a newer one as store_newer,
+// both naming the store path.
+func TestRefuseDataVersionMismatches(t *testing.T) {
+	t.Run("older explicit version", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "state")
+		st, err := Open(dir, Options{})
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		if _, err := st.db.Exec(`UPDATE data_version SET version = ?`, SupportedDataVersion-1); err != nil {
+			t.Fatalf("set data version: %v", err)
+		}
+		st.Close()
+
+		_, err = Open(dir, Options{})
+		if err == nil {
+			t.Fatal("open succeeded on older data version, want refusal")
+		}
+		se, ok := err.(*Error)
+		if !ok || se.Code != CodeStoreDataOlder {
+			t.Fatalf("error = %v, want code %s", err, CodeStoreDataOlder)
+		}
+		if !strings.Contains(se.Message, filepath.Join(dir, DBFilename)) {
+			t.Errorf("message %q does not name the store path", se.Message)
+		}
+	})
+	t.Run("newer data version", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "state")
+		st, err := Open(dir, Options{})
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		if _, err := st.db.Exec(`UPDATE data_version SET version = ?`, SupportedDataVersion+1); err != nil {
+			t.Fatalf("set data version: %v", err)
+		}
+		st.Close()
+
+		_, err = Open(dir, Options{})
+		if err == nil {
+			t.Fatal("open succeeded on newer data version, want refusal")
+		}
+		se, ok := err.(*Error)
+		if !ok || se.Code != CodeStoreNewer {
+			t.Fatalf("error = %v, want code %s", err, CodeStoreNewer)
+		}
+		if !strings.Contains(se.Message, filepath.Join(dir, DBFilename)) {
+			t.Errorf("message %q does not name the store path", se.Message)
+		}
+		if !strings.Contains(se.Message, "store reset") {
+			t.Errorf("message %q does not name the store reset remedy", se.Message)
+		}
+	})
+}
+
+// TestResetRemovesDatabaseFiles verifies that Reset deletes the database
+// files and reports whether anything existed, and that the store reopens
+// fresh with the supported data version afterwards.
+func TestResetRemovesDatabaseFiles(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	st, err := Open(dir, Options{})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	// A process killed mid-transaction can leave non-empty WAL sidecars
+	// behind; Reset must remove those too.
+	for _, name := range []string{DBFilename + "-wal", DBFilename + "-shm"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+	}
+
+	removed, err := Reset(dir)
+	if err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if !removed {
+		t.Error("reset reported nothing removed for an existing store")
+	}
+	for _, name := range []string{DBFilename, DBFilename + "-wal", DBFilename + "-shm"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s still present after reset", name)
+		}
+	}
+
+	// A second reset has nothing to remove.
+	removed, err = Reset(dir)
+	if err != nil {
+		t.Fatalf("second reset: %v", err)
+	}
+	if removed {
+		t.Error("second reset reported removal with no store present")
+	}
+
+	// The store reopens fresh with the supported data version.
+	st2, err := Open(dir, Options{})
+	if err != nil {
+		t.Fatalf("reopen after reset: %v", err)
+	}
+	defer st2.Close()
+	var version int
+	if err := st2.db.QueryRow(`SELECT version FROM data_version`).Scan(&version); err != nil {
+		t.Fatalf("read data_version after reset: %v", err)
+	}
+	if version != SupportedDataVersion {
+		t.Fatalf("data version after reset = %d, want %d", version, SupportedDataVersion)
+	}
+}
+
+// TestResetTargetScopesToTarget publishes streams for two targets (the
+// first for two accounts), marks the first target's events acknowledged,
+// then resets the first target: its rows vanish for both accounts, the
+// other target's stream survives with its events pending for a new
+// consumer, and host-scoped state (leases) survives.
+func TestResetTargetScopesToTarget(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "state")
+	st, err := Open(dir, Options{})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer st.Close()
+
+	other := forge.NewTarget("github", "github.com", "owner/other", 8, "https://github.com/owner/other/pull/8")
+	for _, tgt := range []forge.Target{testTarget(), other} {
+		if _, err := st.Publish(ctx, PublishInput{
+			Target:  tgt,
+			Account: "alice",
+			Snapshot: mkSnapshot("head-"+tgt.ID,
+				[]forge.Thread{{ID: "t1", Author: "rev", Body: "fix this", Path: "main.go"}},
+				nil, nil),
+		}); err != nil {
+			t.Fatalf("publish %s: %v", tgt.ID, err)
+		}
+	}
+	// The reset target is published for a second account too, so the
+	// cross-account reset contract is exercised.
+	if _, err := st.Publish(ctx, PublishInput{
+		Target:  testTarget(),
+		Account: "bob",
+		Snapshot: mkSnapshot("head-bob",
+			[]forge.Thread{{ID: "t1", Author: "rev", Body: "fix this", Path: "main.go"}},
+			nil, nil),
+	}); err != nil {
+		t.Fatalf("publish bob: %v", err)
+	}
+	evs := events(t, st, "alice", "c2")
+	if len(evs) == 0 {
+		t.Fatal("no events to acknowledge")
+	}
+	mustAck(t, st, "alice", "c1", evs[0].ID)
+	if err := st.PutLease(ctx, "github.com", "alice", "tok", baseTime.Add(time.Hour)); err != nil {
+		t.Fatalf("put lease: %v", err)
+	}
+
+	otherBefore, err := st.Inbox(ctx, InboxInput{TargetID: other.ID, Account: "alice", Consumer: "c3", Limit: MaxInboxLimit})
+	if err != nil {
+		t.Fatalf("inbox other before reset: %v", err)
+	}
+	removed, err := st.ResetTarget(ctx, testTarget().ID)
+	if err != nil {
+		t.Fatalf("reset target: %v", err)
+	}
+	if !removed {
+		t.Error("reset reported no stream removed for the published target")
+	}
+
+	// The reset target's stream is gone for both accounts; the other
+	// target's stream survives.
+	for _, account := range []string{"alice", "bob"} {
+		if _, ok, err := st.StreamID(ctx, testTarget().ID, account); err != nil || ok {
+			t.Fatalf("stream for reset target still present for %s (ok=%v, err=%v)", account, ok, err)
+		}
+	}
+	if _, ok, err := st.StreamID(ctx, other.ID, "alice"); err != nil || !ok {
+		t.Fatalf("surviving stream missing (ok=%v, err=%v)", ok, err)
+	}
+	// The surviving stream's events stay deliverable to a new consumer: the
+	// reset removed nothing from it.
+	in, err := st.Inbox(ctx, InboxInput{TargetID: other.ID, Account: "alice", Consumer: "c2", Limit: MaxInboxLimit})
+	if err != nil {
+		t.Fatalf("inbox other: %v", err)
+	}
+	if len(in.Events) != len(otherBefore.Events) || len(in.Events) == 0 {
+		t.Fatalf("pending events on surviving stream = %d, want %d", len(in.Events), len(otherBefore.Events))
+	}
+	// Host-scoped state survives.
+	var token string
+	if err := st.db.QueryRow(`SELECT token FROM leases WHERE host = 'github.com' AND account = 'alice'`).Scan(&token); err != nil {
+		t.Fatalf("read lease after reset: %v", err)
+	}
+	if token != "tok" {
+		t.Fatalf("lease token = %q, want tok", token)
+	}
+}
