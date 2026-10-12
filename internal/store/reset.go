@@ -15,6 +15,22 @@ var resetTables = []string{
 	"objects", "attempts", "schedule", "snapshots",
 }
 
+// Exists reports whether any of the store's database files (the main
+// database or its WAL sidecars) is present in dir. A stat error that is
+// not IsNotExist counts as existing: the open path surfaces the real
+// error. This is the shared file-set check for the reset paths, so a
+// partial reset that leaves sidecars behind is not mistaken for an
+// absent store.
+func Exists(dir string) bool {
+	for _, name := range []string{DBFilename, DBFilename + "-wal", DBFilename + "-shm"} {
+		_, err := os.Stat(filepath.Join(dir, name))
+		if err == nil || !os.IsNotExist(err) {
+			return true
+		}
+	}
+	return false
+}
+
 // Reset deletes the store's database files inside stateDir and reports
 // whether any store file existed. The state directory itself is left in
 // place; the next Open recreates the database from scratch. This is the

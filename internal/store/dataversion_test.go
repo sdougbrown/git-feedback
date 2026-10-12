@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,109 @@ func TestRefuseLegacyStoreWithoutDataVersion(t *testing.T) {
 	}
 	if _, err := Open(dir, Options{}); err == nil {
 		t.Fatal("second open succeeded on legacy store, want refusal (no re-baseline)")
+	}
+}
+
+// TestRefuseUpgradeWithoutDataVersionTable verifies that a v0.3.0-layout
+// store — schema 2 with seeded rows but no data_version table — is
+// refused as the implicit data version 1 (store_data_older), that no
+// re-baseline happens, and that the refusal leaves the store exactly as
+// it was: the pending migrations are not committed (schema still 2, no
+// data_version table) and the seeded rows are intact.
+func TestRefuseUpgradeWithoutDataVersionTable(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "state")
+	st, err := Open(dir, Options{})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := st.Publish(ctx, PublishInput{
+		Target:  testTarget(),
+		Account: "alice",
+		Snapshot: mkSnapshot("head-1",
+			[]forge.Thread{{ID: "t1", Author: "rev", Body: "fix this", Path: "main.go"}},
+			nil, nil),
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	// Downgrade to the v0.3.0 layout: schema 2 (drop the 0003/0004
+	// artifacts) and no data_version table.
+	db, err := sql.Open("sqlite", filepath.Join(dir, DBFilename))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE events DROP COLUMN author`,
+		`ALTER TABLE objects DROP COLUMN author`,
+		`DROP INDEX snapshots_stream_idx`,
+		`UPDATE schema_version SET version = 2`,
+		`DROP TABLE data_version`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			db.Close()
+			t.Fatalf("downgrade %q: %v", stmt, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	// Refused as the pre-data-version store, naming the path and remedy.
+	_, err = Open(dir, Options{})
+	if err == nil {
+		t.Fatal("open succeeded on v0.3.0 store, want refusal")
+	}
+	se, ok := err.(*Error)
+	if !ok || se.Code != CodeStoreDataOlder {
+		t.Fatalf("error = %v, want code %s", err, CodeStoreDataOlder)
+	}
+	if !strings.Contains(se.Message, filepath.Join(dir, DBFilename)) {
+		t.Errorf("message %q does not name the store path", se.Message)
+	}
+	if !strings.Contains(se.Message, "store reset") {
+		t.Errorf("message %q does not name the remedy", se.Message)
+	}
+	// No re-baseline: the second open is refused the same way.
+	if _, err := Open(dir, Options{}); err == nil {
+		t.Fatal("second open succeeded on v0.3.0 store, want refusal")
+	}
+	// The refusal left the store untouched: the pending migrations were
+	// not committed (schema still 2, no data_version table) and the
+	// seeded rows are intact.
+	db, err = sql.Open("sqlite", filepath.Join(dir, DBFilename))
+	if err != nil {
+		t.Fatalf("reopen db: %v", err)
+	}
+	defer db.Close()
+	var version int
+	if err := db.QueryRow(`SELECT MAX(version) FROM schema_version`).Scan(&version); err != nil {
+		t.Fatalf("read schema_version: %v", err)
+	}
+	if version != 2 {
+		t.Errorf("schema version = %d, want 2 (migrations must not commit before the refusal)", version)
+	}
+	var targets, snapshots int
+	if err := db.QueryRow(`SELECT count(*) FROM targets`).Scan(&targets); err != nil {
+		t.Fatalf("count targets: %v", err)
+	}
+	if targets != 1 {
+		t.Errorf("targets rows = %d, want 1", targets)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM snapshots`).Scan(&snapshots); err != nil {
+		t.Fatalf("count snapshots: %v", err)
+	}
+	if snapshots != 1 {
+		t.Errorf("snapshots rows = %d, want 1", snapshots)
+	}
+	var dvTables int
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='data_version'`).Scan(&dvTables); err != nil {
+		t.Fatalf("count data_version table: %v", err)
+	}
+	if dvTables != 0 {
+		t.Error("data_version table present after refused open, want absent")
 	}
 }
 

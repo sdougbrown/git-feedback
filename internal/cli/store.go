@@ -70,12 +70,26 @@ func handleStoreReset(ctx context.Context, inv Invocation) (Result, error) {
 	}
 	// A target-scoped reset needs the store open; with no store file
 	// there is nothing to reset — report unchanged without creating one.
-	if _, err := os.Stat(filepath.Join(dir, store.DBFilename)); err != nil {
-		if os.IsNotExist(err) {
-			r.Status = StatusUnchanged
-			return r, nil
+	// A stat failure (e.g. EACCES) counts as existing and surfaces
+	// through the open path's own error mapping.
+	if !store.Exists(dir) {
+		r.Status = StatusUnchanged
+		return r, nil
+	}
+	// Only sidecar files remain: a partial reset left orphans. The main
+	// database is gone, so no target scope can be resolved — remove the
+	// orphaned files whole, as a full reset would.
+	if _, err := os.Stat(filepath.Join(dir, store.DBFilename)); err != nil && os.IsNotExist(err) {
+		removed, err := store.Reset(dir)
+		if err != nil {
+			return r, mapStoreError(err)
 		}
-		return r, mapStoreError(&store.Error{Code: store.CodeStore, Message: "stat " + filepath.Join(dir, store.DBFilename) + ": " + err.Error()})
+		r.Store.Removed = removed
+		r.Status = StatusUnchanged
+		if removed {
+			r.Status = StatusUpdated
+		}
+		return r, nil
 	}
 	clk := newClock()
 	st, err := openStore(inv, clk)

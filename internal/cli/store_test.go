@@ -273,14 +273,59 @@ func TestStoreResetTargetDoesNotCreateStore(t *testing.T) {
 	}
 }
 
+// TestStoreResetTargetOrphanedSidecars verifies that a target-scoped
+// reset on a store whose main database was removed by a partial reset
+// (non-empty WAL sidecars left behind) removes the orphaned files whole
+// and reports updated, instead of reporting unchanged and leaving the
+// orphans behind.
+func TestStoreResetTargetOrphanedSidecars(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{store.DBFilename + "-wal", store.DBFilename + "-shm"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+	}
+
+	code, env, _ := runCLI(t, []string{"store", "reset", "--target", handlerURL, "--state-dir", dir})
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	if env["status"] != StatusUpdated {
+		t.Errorf("status = %v, want %s", env["status"], StatusUpdated)
+	}
+	storeObj, ok := env["store"].(map[string]any)
+	if !ok {
+		t.Fatalf("store = %v, want object", env["store"])
+	}
+	if storeObj["removed"] != true {
+		t.Errorf("store.removed = %v, want true", storeObj["removed"])
+	}
+	for _, name := range []string{store.DBFilename, store.DBFilename + "-wal", store.DBFilename + "-shm"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s still present after reset", name)
+		}
+	}
+}
+
 // TestStoreResetTargetStatFailure verifies that a non-IsNotExist stat
-// failure on the store-existence guard (e.g. EACCES) maps to the stable
+// failure on the store-existence guard (EACCES on the mode-0 directory)
+// counts as existing and surfaces through the open path's own error
+// mapping (the mode-0 database file cannot be opened) as the stable
 // store code rather than an internal error.
 func TestStoreResetTargetStatFailure(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("requires non-root to trigger permission-denied stat")
 	}
 	dir := t.TempDir()
+	// An empty, unreadable database file: the guard's stat fails
+	// (EACCES) and the open path's EACCES on the file maps to the
+	// stable store code (an empty file is not corrupt).
+	if err := os.WriteFile(filepath.Join(dir, store.DBFilename), nil, 0); err != nil {
+		t.Fatalf("create db file: %v", err)
+	}
+	if err := os.Chmod(filepath.Join(dir, store.DBFilename), 0); err != nil {
+		t.Fatalf("chmod db file: %v", err)
+	}
 	if err := os.Chmod(dir, 0); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
