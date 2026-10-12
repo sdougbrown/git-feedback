@@ -19,12 +19,9 @@ import (
 
 // publishTargetURL publishes one thread-bearing snapshot for targetURL and
 // fails the test on error.
-func publishTargetURL(t *testing.T, st *store.Store, targetURL, head string) forge.Target {
+func publishTargetURL(t *testing.T, st *store.Store, targetURL, head string) {
 	t.Helper()
 	target := forge.NewTarget("github", "github.com", "owner/other", 8, targetURL)
-	if targetURL == handlerURL {
-		target = handlerTarget()
-	}
 	snap := &forge.Snapshot{
 		Head:           head,
 		CollectedStart: handlerBaseTime.Add(-time.Minute),
@@ -36,7 +33,6 @@ func publishTargetURL(t *testing.T, st *store.Store, targetURL, head string) for
 	}); err != nil {
 		t.Fatalf("publish %s: %v", targetURL, err)
 	}
-	return target
 }
 
 // stripDataVersion removes the data version row from the store at dir,
@@ -137,7 +133,7 @@ func TestStoreResetRemovesStore(t *testing.T) {
 func TestStoreResetTargetScoped(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")
-	_ = publishTargetURL(t, st, "https://github.com/owner/other/pull/8", "head-other")
+	publishTargetURL(t, st, "https://github.com/owner/other/pull/8", "head-other")
 	if err := st.Close(); err != nil {
 		t.Fatalf("close seed store: %v", err)
 	}
@@ -274,6 +270,26 @@ func TestStoreResetTargetDoesNotCreateStore(t *testing.T) {
 	// The store must not have been created.
 	if _, err := os.Stat(filepath.Join(dir, "feedback.db")); !os.IsNotExist(err) {
 		t.Error("target reset created the store database")
+	}
+}
+
+// TestStoreResetTargetStatFailure verifies that a non-IsNotExist stat
+// failure on the store-existence guard (e.g. EACCES) maps to the stable
+// store code rather than an internal error.
+func TestStoreResetTargetStatFailure(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+
+	code, env, _ := runCLI(t, []string{"store", "reset", "--target", handlerURL, "--state-dir", dir})
+	if code != ExitOperational {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	errObj, ok := env["error"].(map[string]any)
+	if !ok || errObj["code"] != store.CodeStore {
+		t.Fatalf("error envelope = %v, want code %s", env["error"], store.CodeStore)
 	}
 }
 

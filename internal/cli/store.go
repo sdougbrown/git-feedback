@@ -75,7 +75,7 @@ func handleStoreReset(ctx context.Context, inv Invocation) (Result, error) {
 			r.Status = StatusUnchanged
 			return r, nil
 		}
-		return r, err
+		return r, mapStoreError(&store.Error{Code: store.CodeStore, Message: "stat " + filepath.Join(dir, store.DBFilename) + ": " + err.Error()})
 	}
 	clk := newClock()
 	st, err := openStore(inv, clk)
