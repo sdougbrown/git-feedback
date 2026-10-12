@@ -39,7 +39,7 @@ func publishTargetURL(t *testing.T, st *store.Store, targetURL, head string) {
 // mimicking a store written before data versioning.
 func stripDataVersion(t *testing.T, dir string) {
 	t.Helper()
-	db, err := sql.Open("sqlite", filepath.Join(dir, "feedback.db"))
+	db, err := sql.Open("sqlite", filepath.Join(dir, store.DBFilename))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestStorePathCommand(t *testing.T) {
 		t.Errorf("store.path = %v, want %q", storeObj["path"], dir)
 	}
 	// The store must not have been created.
-	if _, err := os.Stat(filepath.Join(dir, "feedback.db")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, store.DBFilename)); !os.IsNotExist(err) {
 		t.Error("store path created the store database")
 	}
 }
@@ -91,7 +91,7 @@ func TestStoreResetRemovesStore(t *testing.T) {
 	if env["status"] != StatusUpdated {
 		t.Errorf("status = %v, want %s", env["status"], StatusUpdated)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "feedback.db")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, store.DBFilename)); !os.IsNotExist(err) {
 		t.Error("database file still present after reset")
 	}
 	storeObj, ok := env["store"].(map[string]any)
@@ -246,7 +246,7 @@ func TestStoreResetTargetDoesNotCreateStore(t *testing.T) {
 		t.Errorf("status = %v, want %s", env["status"], StatusUnchanged)
 	}
 	// The store must not have been created.
-	if _, err := os.Stat(filepath.Join(dir, "feedback.db")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, store.DBFilename)); !os.IsNotExist(err) {
 		t.Error("target reset created the store database")
 	}
 }
@@ -361,7 +361,7 @@ func assertDataOlderRefusal(t *testing.T, stdout bytes.Buffer, dir string) {
 		t.Fatalf("error envelope = %v, want code %s", envelope["error"], store.CodeStoreDataOlder)
 	}
 	msg, _ := errObj["message"].(string)
-	if !strings.Contains(msg, filepath.Join(dir, "feedback.db")) || !strings.Contains(msg, "store reset") {
+	if !strings.Contains(msg, filepath.Join(dir, store.DBFilename)) || !strings.Contains(msg, "store reset") {
 		t.Errorf("message %q does not name the path and remedy", msg)
 	}
 }
@@ -405,6 +405,7 @@ func TestStoreUsageErrors(t *testing.T) {
 		argv []string
 	}{
 		{"missing subcommand", []string{"store", "--state-dir", dir}},
+		{"store, no args", []string{"store"}},
 		{"unknown subcommand", []string{"store", "bogus"}},
 		{"stray positional", []string{"store", "path", "https://github.com/o/r/pull/1"}},
 		{"reset stray positional", []string{"store", "reset", "https://github.com/o/r/pull/1"}},
