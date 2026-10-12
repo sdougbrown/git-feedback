@@ -277,6 +277,9 @@ func TestStoreResetTargetDoesNotCreateStore(t *testing.T) {
 // failure on the store-existence guard (e.g. EACCES) maps to the stable
 // store code rather than an internal error.
 func TestStoreResetTargetStatFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires non-root to trigger permission-denied stat")
+	}
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0); err != nil {
 		t.Fatalf("chmod: %v", err)
