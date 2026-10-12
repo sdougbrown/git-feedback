@@ -210,6 +210,14 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		command = argv[0]
 	}
 
+	// --help on the store command prints the store-specific help on stdout
+	// and exits 0; plain `store` without --help keeps the missing-subcommand
+	// usage error.
+	if command == "store" && hasHelpFlag(argv[1:]) {
+		fmt.Fprint(stdout, StoreUsage)
+		return ExitOK
+	}
+
 	inv, err := parseInvocation(argv)
 	if err != nil {
 		writeResult(stdout, errorResult(command, err))
@@ -326,6 +334,16 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	n, err := c.w.Write(p)
 	*c.n += int64(n)
 	return n, err
+}
+
+// hasHelpFlag reports whether args contain a help request (--help or -h).
+func hasHelpFlag(args []string) bool {
+	for _, a := range args {
+		if a == "--help" || a == "-h" {
+			return true
+		}
+	}
+	return false
 }
 
 // errorResult builds the error envelope for a failure.
