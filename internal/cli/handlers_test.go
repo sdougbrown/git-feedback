@@ -872,6 +872,29 @@ func TestAckEventsFromEventRecords(t *testing.T) {
 		}
 	})
 
+	t.Run("full wait records envelope", func(t *testing.T) {
+		// The wait half of the same pipeline: wait --json piped straight
+		// into ack, with no --ids-only step.
+		dir, st, _ := handlerEnv(t)
+		publishHandler(t, st, "alice")
+		_, _, waitStdout, _ := runCLIStd(t, []string{
+			"wait", "--json", "--timeout", "5s", "--consumer", "ci", "--state-dir", dir, handlerURL,
+		})
+		withStdin(t, waitStdout)
+
+		code, env, _ := runCLI(t, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertContract(t, env)
+		assertAckReceipt(t, env, "e1", "e2", "e3", "e4")
+		if n := pendingCount(t, st); n != 0 {
+			t.Errorf("pending events = %d, want 0 after wait envelope ack", n)
+		}
+	})
+
 	t.Run("bare array of event records", func(t *testing.T) {
 		dir, st, _ := handlerEnv(t)
 		publishHandler(t, st, "alice")
@@ -986,7 +1009,7 @@ func TestAckEventsFromTruncatedEnvelope(t *testing.T) {
 	if env["error"].(map[string]any)["code"] != "usage" {
 		t.Errorf("error = %v, want usage", env["error"])
 	}
-	if msg, _ := env["error"].(map[string]any)["message"].(string); !strings.Contains(msg, "has_more: true") || !strings.Contains(msg, "rerun inbox or wait with a larger --limit") {
+	if msg, _ := env["error"].(map[string]any)["message"].(string); !strings.Contains(msg, "has_more: true") || !strings.Contains(msg, "rerun") || !strings.Contains(msg, "--limit") {
 		t.Errorf("error message = %q, want has_more: true and paging guidance", msg)
 	}
 	// Nothing was acknowledged.
