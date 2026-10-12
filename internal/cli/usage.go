@@ -1,0 +1,59 @@
+package cli
+
+// Usage is the full help text printed for bare `git-feedback --help`. The
+// Commands and Contract blocks are the agent-facing surface: they describe
+// each command's role, the replay flow, and the envelope/exit-code contract
+// that registry and harness callers key on.
+const Usage = `git-feedback observes GitHub review feedback and delivers replayable events.
+
+Usage:
+  git-feedback reconcile <URL> [--head <SHA>] [--account <LOGIN>] [--state-dir <DIR>] [--json]
+  git-feedback snapshot <URL> --snapshot <ID> --output <FILE> [--account <LOGIN>] [--state-dir <DIR>] [--json]
+  git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--exclude-self] [--skip-empty-reviews] [--json]
+  git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--events-from -] [--account <LOGIN>] [--state-dir <DIR>] [--json]
+  git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--skip-empty-reviews] [--skip-head-changed] [--json]
+  git-feedback store path [--state-dir <DIR>]
+  git-feedback store reset [--target <URL>] [--state-dir <DIR>]
+
+Commands:
+  reconcile     collect feedback and establish the baseline
+  snapshot      export a stored collection to a file
+  inbox         list pending events for a consumer
+  ack           acknowledge delivered event IDs
+  wait          block until new events arrive or --timeout elapses (bounded polling)
+  store path    print the resolved store directory; never opens the store
+  store reset   delete the store, wholly or scoped to one --target URL
+
+Typical flow:
+  reconcile → wait → ack
+  wait delivers pending events; ack records their receipt. wait itself
+  acknowledges nothing, so an interrupted consumer replays the same events.
+
+Contract:
+  Every subcommand writes exactly one JSON envelope with a "status" field to
+  stdout; diagnostics go to stderr. Operational errors exit 1, usage errors
+  exit 2. Registry and harness callers should key on "status", not the exit
+  code. Full machine contract: docs/contract.md.
+
+Flags:
+  --version    print version and exit
+  --help       show this help
+`
+
+// StoreUsage is the help text printed for `store --help`. The store is a
+// disposable cache, so both subcommands are one-liners; the flow and envelope
+// contract live in the bare help and docs/contract.md.
+const StoreUsage = `git-feedback store — disposable store utilities.
+
+The store is a cache: delete it freely and the next collection starts from a
+new baseline.
+
+Usage:
+  git-feedback store path [--state-dir <DIR>]
+      print the resolved store directory; never opens the store
+  git-feedback store reset [--target <URL>] [--state-dir <DIR>]
+      delete the store, wholly or scoped to one --target URL
+
+Each subcommand writes exactly one JSON envelope with a "status" field;
+usage errors exit 2. Full machine contract: docs/contract.md.
+`

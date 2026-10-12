@@ -23,26 +23,8 @@ func main() {
 		return
 	}
 	if len(argv) > 0 && (argv[0] == "--help" || argv[0] == "-h") {
-		printUsage()
+		fmt.Print(cli.Usage)
 		return
 	}
 	os.Exit(cli.Run(argv, os.Stdout, os.Stderr))
-}
-
-func printUsage() {
-	fmt.Print(`git-feedback observes GitHub review feedback and delivers replayable events.
-
-Usage:
-  git-feedback reconcile <URL> [--head <SHA>] [--account <LOGIN>] [--state-dir <DIR>] [--json]
-  git-feedback snapshot <URL> --snapshot <ID> --output <FILE> [--account <LOGIN>] [--state-dir <DIR>] [--json]
-  git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--exclude-self] [--json]
-  git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--events-from -] [--account <LOGIN>] [--state-dir <DIR>] [--json]
-  git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--json]
-  git-feedback store path [--state-dir <DIR>]
-  git-feedback store reset [--target <URL>] [--state-dir <DIR>]
-
-Flags:
-  --version    print version and exit
-  --help       show this help
-`)
 }
