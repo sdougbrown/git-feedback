@@ -23,12 +23,8 @@ func main() {
 		return
 	}
 	if len(argv) > 0 && (argv[0] == "--help" || argv[0] == "-h") {
-		printUsage()
+		fmt.Print(cli.Usage)
 		return
 	}
 	os.Exit(cli.Run(argv, os.Stdout, os.Stderr))
-}
-
-func printUsage() {
-	fmt.Print(cli.Usage)
 }

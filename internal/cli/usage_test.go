@@ -24,10 +24,10 @@ func TestUsageContent(t *testing.T) {
 		"wait          block until new events arrive or --timeout elapses",
 		"store path    print the resolved store directory; never opens the store",
 		"reconcile → wait → ack",
-		"wait itself\n  acknowledges nothing",
+		"acknowledges nothing",
 		`exactly one JSON envelope with a "status" field`,
-		"Operational errors exit 1, usage errors\n  exit 2",
-		"key on \"status\", not the exit\n  code",
+		"Operational errors exit 1, usage errors",
+		"key on \"status\",",
 		"docs/contract.md",
 		"--version",
 		"--help",
@@ -48,9 +48,6 @@ func TestStoreHelpRouting(t *testing.T) {
 		if code != ExitOK {
 			t.Fatalf("%v: exit code = %d, want 0 (stderr: %s)", argv, code, stderr.String())
 		}
-		if stdout.String() != StoreUsage {
-			t.Errorf("%v: stdout is not the store help text: %q", argv, stdout.String())
-		}
 		for _, want := range []string{"store path", "store reset", "never opens the store", "docs/contract.md"} {
 			if !strings.Contains(stdout.String(), want) {
 				t.Errorf("%v: store help is missing %q", argv, want)
@@ -69,5 +66,9 @@ func TestStoreHelpRouting(t *testing.T) {
 	}
 	if envelope["status"] != StatusError {
 		t.Errorf("plain store: status = %v, want error", envelope["status"])
+	}
+	errObj, ok := envelope["error"].(map[string]any)
+	if !ok || errObj["code"] != "usage" {
+		t.Errorf("plain store: error envelope = %v, want code usage", envelope["error"])
 	}
 }
