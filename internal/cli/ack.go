@@ -102,8 +102,11 @@ func resolveAckEventIDs(inv Invocation) ([]string, error) {
 }
 
 // readEventIDsFromStdin parses stdin as one ID per line, a JSON array of
-// ID strings, or a full inbox --ids-only result envelope. A form that
-// yields zero IDs is a usage error, never a silent success.
+// ID strings or event records, or a full result envelope (inbox or wait)
+// whose events array holds ID strings or event records. An event record
+// contributes its "id" field; a record without a string "id" is a usage
+// error. A form that yields zero IDs is a usage error, never a silent
+// success.
 func readEventIDsFromStdin(r io.Reader) ([]string, error) {
 	raw, err := io.ReadAll(r)
 	if err != nil {
@@ -116,8 +119,17 @@ func readEventIDsFromStdin(r io.Reader) ([]string, error) {
 	var ids []string
 	switch {
 	case strings.HasPrefix(trimmed, "["):
-		if err := json.Unmarshal([]byte(trimmed), &ids); err != nil {
-			return nil, &usageError{fmt.Sprintf("--events-from stdin is not a JSON array of ID strings: %v", err)}
+		var items []any
+		if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
+			return nil, &usageError{fmt.Sprintf("--events-from stdin is not a JSON array of IDs or event records: %v", err)}
+		}
+		ids = make([]string, 0, len(items))
+		for _, item := range items {
+			id, err := eventIDFromItem(item)
+			if err != nil {
+				return nil, err
+			}
+			ids = append(ids, id)
 		}
 	case strings.HasPrefix(trimmed, "{"):
 		var envelope struct {
@@ -129,14 +141,14 @@ func readEventIDsFromStdin(r io.Reader) ([]string, error) {
 		}
 		ids = make([]string, 0, len(envelope.Events))
 		for _, e := range envelope.Events {
-			s, ok := e.(string)
-			if !ok {
-				return nil, &usageError{"ack --events-from - received event records, not ID strings; rerun inbox with --ids-only"}
+			id, err := eventIDFromItem(e)
+			if err != nil {
+				return nil, err
 			}
-			ids = append(ids, s)
+			ids = append(ids, id)
 		}
 		if envelope.HasMore {
-			return nil, &usageError{"ack --events-from - received a truncated inbox page (has_more: true); rerun inbox with --limit 200 or page with --after"}
+			return nil, &usageError{"ack --events-from - received a truncated page (has_more: true); rerun inbox or wait with a larger --limit; inbox can page with --after"}
 		}
 	default:
 		ids = make([]string, 0)
@@ -161,4 +173,26 @@ func readEventIDsFromStdin(r io.Reader) ([]string, error) {
 		return nil, &usageError{"--events-from - read no event IDs from stdin"}
 	}
 	return ids, nil
+}
+
+// eventIDFromItem extracts the event ID from one element of an events
+// array: either a plain ID string or an event record whose "id" field is
+// a string. Anything else is a usage error.
+func eventIDFromItem(item any) (string, error) {
+	switch v := item.(type) {
+	case string:
+		return v, nil
+	case map[string]any:
+		raw, ok := v["id"]
+		if !ok {
+			return "", &usageError{`ack --events-from - received an event record without an "id" field`}
+		}
+		s, ok := raw.(string)
+		if !ok {
+			return "", &usageError{`ack --events-from - received an event record whose "id" is not a string`}
+		}
+		return s, nil
+	default:
+		return "", &usageError{"ack --events-from - received an item that is neither an ID string nor an event record"}
+	}
 }

@@ -968,6 +968,88 @@ func TestAckEventsFromStdin(t *testing.T) {
 	})
 }
 
+func TestAckEventsFromEventRecords(t *testing.T) {
+	t.Run("full inbox records envelope", func(t *testing.T) {
+		// The exact pipeline from the issue: inbox (default full records)
+		// piped straight into ack, with no --ids-only step.
+		dir, st, _ := handlerEnv(t)
+		publishHandler(t, st, "alice")
+		_, _, inboxStdout, _ := runCLIStd(t, []string{
+			"inbox", "--consumer", "ci", "--state-dir", dir, handlerURL,
+		})
+		withStdin(t, inboxStdout)
+
+		code, env, _ := runCLI(t, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertContract(t, env)
+		assertAckReceipt(t, env, "e1", "e2", "e3", "e4")
+		if n := pendingCount(t, st); n != 0 {
+			t.Errorf("pending events = %d, want 0 after records envelope ack", n)
+		}
+	})
+
+	t.Run("full wait records envelope", func(t *testing.T) {
+		// The wait half of the same pipeline: wait --json piped straight
+		// into ack, with no --ids-only step.
+		dir, st, _ := handlerEnv(t)
+		publishHandler(t, st, "alice")
+		_, _, waitStdout, _ := runCLIStd(t, []string{
+			"wait", "--json", "--timeout", "5s", "--consumer", "ci", "--state-dir", dir, handlerURL,
+		})
+		withStdin(t, waitStdout)
+
+		code, env, _ := runCLI(t, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertContract(t, env)
+		assertAckReceipt(t, env, "e1", "e2", "e3", "e4")
+		if n := pendingCount(t, st); n != 0 {
+			t.Errorf("pending events = %d, want 0 after wait envelope ack", n)
+		}
+	})
+
+	t.Run("bare array of event records", func(t *testing.T) {
+		dir, st, _ := handlerEnv(t)
+		publishHandler(t, st, "alice")
+		withStdin(t, `[ {"id": "e1", "kind": "revision"}, {"id": "e2", "kind": "revision"} ]`)
+
+		code, env, _ := runCLI(t, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertAckReceipt(t, env, "e1", "e2")
+		if n := pendingCount(t, st); n != 2 {
+			t.Errorf("pending events = %d, want 2 after records array ack", n)
+		}
+	})
+
+	t.Run("mixed IDs and records", func(t *testing.T) {
+		dir, st, _ := handlerEnv(t)
+		publishHandler(t, st, "alice")
+		withStdin(t, `["e1", {"id": "e2"}]`)
+
+		code, env, _ := runCLI(t, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertAckReceipt(t, env, "e1", "e2")
+		if n := pendingCount(t, st); n != 2 {
+			t.Errorf("pending events = %d, want 2 after mixed ack", n)
+		}
+	})
+}
+
 func TestAckEventsFromCombinedWithEventFlag(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")
@@ -990,28 +1072,41 @@ func TestAckEventsFromUsageErrors(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")
 	tests := []struct {
-		name  string
-		stdin string
-		argv  []string
+		name    string
+		stdin   string
+		argv    []string
+		wantMsg string
 	}{
 		{"empty stdin", "", []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
-		}},
+		}, "read no event IDs from stdin"},
 		{"blank stdin", "\n  \n", []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
-		}},
+		}, "read no event IDs from stdin"},
 		{"zero-id json array", "[]", []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
-		}},
-		{"not a json array", "[\"e1\", 2]", []string{
+		}, "read no event IDs from stdin"},
+		{"array item that is neither an ID string nor a record", "[\"e1\", 2]", []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
-		}},
+		}, "neither an ID string nor an event record"},
+		{"record without id", `{"events":[{"id":"e1"},{"kind":"revision"}]}`, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}, `record without an "id" field`},
+		{"record with non-string id", `{"events":[{"id":1}]}`, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}, `"id" is not a string`},
+		{"array item without id field", `["e1", {"kind":"revision"}]`, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}, `record without an "id" field`},
 		{"non-stdin value", "e1\n", []string{
 			"ack", "--consumer", "ci", "--events-from", "file.txt", "--state-dir", dir, handlerURL,
-		}},
-		{"full event-records envelope", `{"events":[{"id":"e1","kind":"revision"},{"id":"e2","kind":"revision"}]}`, []string{
+		}, "only supports '-' (stdin)"},
+		{"truncated json array", `[{"id":"e1",`, []string{
 			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
-		}},
+		}, "not a JSON array of IDs or event records"},
+		{"truncated envelope", `{"events":["e1",`, []string{
+			"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, handlerURL,
+		}, "not a result envelope"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1022,6 +1117,9 @@ func TestAckEventsFromUsageErrors(t *testing.T) {
 			}
 			if env["error"].(map[string]any)["code"] != "usage" {
 				t.Errorf("error = %v, want usage", env["error"])
+			}
+			if msg, _ := env["error"].(map[string]any)["message"].(string); !strings.Contains(msg, tc.wantMsg) {
+				t.Errorf("message %q does not contain %q", msg, tc.wantMsg)
 			}
 		})
 	}
@@ -1040,6 +1138,9 @@ func TestAckEventsFromTruncatedEnvelope(t *testing.T) {
 	}
 	if env["error"].(map[string]any)["code"] != "usage" {
 		t.Errorf("error = %v, want usage", env["error"])
+	}
+	if msg, _ := env["error"].(map[string]any)["message"].(string); !strings.Contains(msg, "has_more: true") || !strings.Contains(msg, "rerun") || !strings.Contains(msg, "--limit") {
+		t.Errorf("error message = %q, want has_more: true and paging guidance", msg)
 	}
 	// Nothing was acknowledged.
 	if n := pendingCount(t, st); n != 4 {
