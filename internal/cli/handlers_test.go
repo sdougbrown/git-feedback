@@ -114,7 +114,7 @@ func assertContract(t *testing.T, env map[string]any) {
 	for _, key := range []string{
 		"schema", "command", "status", "target", "account", "observed_head",
 		"expected_head", "snapshot", "attempt", "freshness", "reviewer_completion",
-		"events", "has_more", "next_cursor", "export", "store", "error",
+		"events", "has_more", "next_cursor", "export", "store", "object", "error",
 	} {
 		if _, ok := env[key]; !ok {
 			t.Errorf("missing contract field %q", key)
@@ -184,6 +184,7 @@ func TestLocalWithoutStreamIsExplicitError(t *testing.T) {
 		{"snapshot", []string{"snapshot", "--snapshot", "s1", "--output", "out.json", "--state-dir", state, handlerURL}},
 		{"inbox", []string{"inbox", "--consumer", "ci", "--state-dir", state, handlerURL}},
 		{"ack", []string{"ack", "--consumer", "ci", "--event", "e1", "--state-dir", state, handlerURL}},
+		{"show", []string{"show", "--event", "e1", "--state-dir", state, handlerURL}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

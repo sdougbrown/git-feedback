@@ -92,6 +92,10 @@ var specs = map[string]commandSpec{
 		flags:  []flagSpec{{"consumer", flagString}, {"event", flagRepeat}, {"events-from", flagString}},
 		handle: handleAck,
 	},
+	"show": {
+		flags:  []flagSpec{{"event", flagString}},
+		handle: handleShow,
+	},
 	"wait": {
 		flags:  []flagSpec{{"consumer", flagString}, {"timeout", flagString}, {"head", flagString}, {"limit", flagString}, {"exclude-self", flagBool}, {"skip-empty-reviews", flagBool}, {"skip-head-changed", flagBool}},
 		handle: handleWait,
