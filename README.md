@@ -232,7 +232,9 @@ appear in stdout, stderr, the database, or snapshot exports.
 `snapshot`, `inbox`, and `ack` tools (not `wait`). See `docs/contract.md` for the
 controller and monitor modes, the monitor loop idiom, and the rationale for
 excluding `wait`. `examples/watch-loop.sh` is a ready-made wrapper that runs
-`wait`, acknowledges the delivered event IDs, and respawns until interrupted.
+`wait`, acknowledges the delivered event IDs, and respawns until interrupted —
+suited to harness-external loops; an agent loop should instead ack only after
+it has handled each batch (see `examples/skill/SKILL.md`).
 
 The manifest declares an explicit `env` of `{"HOME": "env:HOME", "PATH":
 "env:PATH"}`. On a machine where `gh` reads a non-default config location or a
@@ -247,10 +249,10 @@ environments, use an explicit `--state-dir` so each caller selects its own store
 `examples/skill/` is a ready-made agent skill (a `SKILL.md` with a recipes
 reference) that drives the pass and watch shapes an autonomous coding agent
 needs: reconcile → inbox → extract the delta → triage → ack, plus a bounded
-`wait` loop for watching a PR. The skill format is portable across agent
-harnesses (Claude Code, Codex, OpenCode, pi) without a plugin package. Copy the
-directory into your harness's skill directory and adapt the consumer names to
-your own conventions.
+`wait` loop for watching a PR. The core guidance is harness-agnostic; the
+frontmatter and `$ARGUMENTS` invocation follow Claude Code conventions, so
+other harnesses need that invocation line adapted. Copy the directory into your
+harness's skill directory and adapt the consumer names to your own conventions.
 
 ## Registry smoke test
 

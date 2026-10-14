@@ -1,6 +1,6 @@
 # git-feedback jq recipes
 
-Variables: `SNAP` is an exported snapshot file, `INBOX` an `inbox` or `wait` envelope (for a multi-page delta, merge pages first: `jq -s '{events: [.[].events[]]}' inbox-*.json > inbox-merged.json`), `LEDGER_IDS` a file of handled object IDs, one per line.
+Variables: `SNAP` is an exported snapshot file, `INBOX` an `inbox` or `wait` envelope (for a multi-page delta, merge that snapshot's pages first: `jq -s '{events: [.[].events[]]}' inbox-<SNAPSHOT_ID>*.json > inbox-merged.json`), `LEDGER_IDS` a file of handled object IDs, one per line.
 
 ## Objects named by a batch
 
