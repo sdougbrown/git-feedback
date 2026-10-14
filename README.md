@@ -242,6 +242,16 @@ not require optional variables that may be unset; the registry treats a missing
 `env:NAME` as a load error. When integrating callers with different config
 environments, use an explicit `--state-dir` so each caller selects its own store.
 
+## Agent skill example
+
+`examples/skill/` is a ready-made agent skill (a `SKILL.md` with a recipes
+reference) that drives the pass and watch shapes an autonomous coding agent
+needs: reconcile → inbox → extract the delta → triage → ack, plus a bounded
+`wait` loop for watching a PR. The skill format is portable across agent
+harnesses (Claude Code, Codex, OpenCode, pi) without a plugin package. Copy the
+directory into your harness's skill directory and adapt the consumer names to
+your own conventions.
+
 ## Registry smoke test
 
 `make registry-test` runs the cli-registry smoke gate (`integration/registry_test.go`),
