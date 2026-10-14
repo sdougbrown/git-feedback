@@ -23,8 +23,9 @@ type ShowResult struct {
 	Event Event
 	// Object is the stored object content — *forge.Thread (with its
 	// comments), *forge.Review, or *forge.Comment. It is nil for synthetic
-	// target events and when the object is absent from the snapshot body
-	// (not_observed, reappearance), where no stored content exists.
+	// target events and when the object is absent from the event's snapshot
+	// body (always so for not_observed); a reappearance revision event's
+	// snapshot contains the object, so it shows the reapplied content.
 	Object any
 }
 

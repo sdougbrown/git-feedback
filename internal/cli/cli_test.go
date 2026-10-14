@@ -227,6 +227,7 @@ func TestEnvelopeFields(t *testing.T) {
 		{"snapshot", []string{"snapshot", "--snapshot", "s1", "--output", "/tmp/x", "--state-dir", base, "https://github.com/o/r/pull/1"}, "unknown_stream", 1},
 		{"inbox", []string{"inbox", "--consumer", "ci", "--state-dir", base, "https://github.com/o/r/pull/1"}, "unknown_stream", 1},
 		{"ack", []string{"ack", "--consumer", "ci", "--event", "e1", "--state-dir", base, "https://github.com/o/r/pull/1"}, "unknown_stream", 1},
+		{"show", []string{"show", "--event", "e1", "--state-dir", base, "https://github.com/o/r/pull/1"}, "unknown_stream", 1},
 		{"wait", []string{"wait", "--state-dir", base, "https://github.com/o/r/pull/1"}, "usage", 2},
 	}
 	for _, tc := range tests {

@@ -184,6 +184,7 @@ func TestLocalWithoutStreamIsExplicitError(t *testing.T) {
 		{"snapshot", []string{"snapshot", "--snapshot", "s1", "--output", "out.json", "--state-dir", state, handlerURL}},
 		{"inbox", []string{"inbox", "--consumer", "ci", "--state-dir", state, handlerURL}},
 		{"ack", []string{"ack", "--consumer", "ci", "--event", "e1", "--state-dir", state, handlerURL}},
+		{"show", []string{"show", "--event", "e1", "--state-dir", state, handlerURL}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
