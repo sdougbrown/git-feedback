@@ -243,7 +243,7 @@ func TestEnvelopeFields(t *testing.T) {
 			for _, key := range []string{
 				"schema", "command", "status", "target", "account", "observed_head",
 				"expected_head", "snapshot", "attempt", "freshness", "reviewer_completion",
-				"events", "has_more", "next_cursor", "export", "store", "error",
+				"events", "has_more", "next_cursor", "export", "store", "object", "error",
 			} {
 				if _, ok := envelope[key]; !ok {
 					t.Errorf("%s: missing contract field %q", tc.name, key)

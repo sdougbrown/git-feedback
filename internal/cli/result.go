@@ -100,7 +100,11 @@ type Result struct {
 	NextCursor         *string    `json:"next_cursor"`
 	Export             *Export    `json:"export"`
 	Store              *StoreInfo `json:"store"`
-	Error              *Error     `json:"error"`
+	// Object carries the stored object content returned by the show command:
+	// the thread, review, or comment as recorded in the event's snapshot.
+	// Null on every other command and when no stored content exists.
+	Object any    `json:"object"`
+	Error  *Error `json:"error"`
 }
 
 // Write emits exactly one JSON value for r to w, applying the envelope

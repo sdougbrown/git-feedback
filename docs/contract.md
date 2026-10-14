@@ -15,7 +15,7 @@ Every subcommand writes exactly one JSON value to stdout. The one exception:
 ```json
 {
   "schema": "git-feedback/v1",
-  "command": "reconcile|snapshot|inbox|ack|wait|store",
+  "command": "reconcile|snapshot|inbox|show|ack|wait|store",
   "status": "updated|unchanged|deferred|busy|head_changed|ok|events|timeout|error",
   "target": {"id": "", "url": "", "forge": "", "host": "", "repo": "", "number": 0},
   "account": "<login>|null",
@@ -30,11 +30,12 @@ Every subcommand writes exactly one JSON value to stdout. The one exception:
   "next_cursor": null,
   "export": {"path": "", "digest": "", "counts": {}},
   "store": {"path": "", "target": null, "removed": false},
+  "object": null,
   "error": null
 }
 ```
 
-- `reconcile` returns `updated`, `unchanged`, `deferred`, `busy`, or `head_changed`. `snapshot`, `inbox`, `ack`, and `store path` return `ok`. `store reset` returns `updated` when store content was removed and `unchanged` otherwise. `wait` returns `events`, `timeout`, or `head_changed`; `head_changed` ends the wait when the consumer pinned a head that no longer matches the observed head. All of these exit 0.
+- `reconcile` returns `updated`, `unchanged`, `deferred`, `busy`, or `head_changed`. `snapshot`, `inbox`, `show`, `ack`, and `store path` return `ok`. `store reset` returns `updated` when store content was removed and `unchanged` otherwise. `wait` returns `events`, `timeout`, or `head_changed`; `head_changed` ends the wait when the consumer pinned a head that no longer matches the observed head. All of these exit 0.
 - `error` is `{"code": "", "message": "", "retryable": false}` with `status: "error"`. Operational errors exit 1; usage errors exit 2. Both still print the envelope.
 - `snapshot` may be null when no complete snapshot exists. `attempt` is nullable and reports the latest attempt separately from `snapshot.complete`. Deferred admission or failed refresh must never report a successful current attempt just because cached state exists.
 - `freshness.snapshot_observed_at` is the last successful complete observation for the returned snapshot, including unchanged collections. Set `stale` after the collection interval elapses or a subsequent refresh fails/drifts. Immutable snapshot collection timestamps remain unchanged.
@@ -53,6 +54,7 @@ Every subcommand writes exactly one JSON value to stdout. The one exception:
 - Delivery-time head-change filter: with `--skip-head-changed` on `wait`, a pending event with kind `head_changed` and object kind `target` is skipped at delivery. Feedback events always deliver. Skipped events stay pending; the store is unchanged, so a flagless consumer receives them later.
 - Event `url` is the object's own URL (thread root comment, review, or comment), falling back to the target's PR URL when the object carries none; target events always carry the PR URL.
 - Event ID is `e<seq>` where `seq` is `INTEGER PRIMARY KEY AUTOINCREMENT` on `events`. IDs are opaque to callers and never content hashes.
+- `show <URL> --event <ID>` fetches one event's stored object content read-only: the event record renders in `events` (so a show envelope pipes into `ack --events-from -`) and the object as recorded in the event's snapshot renders in `object` — the thread with its comments, the review with its state and body, or the top-level comment. It is local store access only: no authentication, no network, and it acknowledges nothing. `object` is null for target (head) events and when the object is absent from the snapshot body (`not_observed`, reappearance). The store retains its full history, so `show` works after ack; consumers can verify review-body completion markers without dropping to the forge API.
 - Initial publication emits a target `initial_observation` containing the head. A subsequent complete stable-head collection emits a target `head_changed` event when the head differs, even with identical feedback. Commit it with the new snapshot so lost output remains replayable. Head drift during collection and pinned-head mismatches instead persist incomplete-attempt metadata; they do not publish mixed-head snapshots.
 
 ## Inbox cursor

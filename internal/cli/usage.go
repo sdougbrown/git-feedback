@@ -11,6 +11,7 @@ Usage:
   git-feedback snapshot <URL> --snapshot <ID> --output <FILE> [--account <LOGIN>] [--state-dir <DIR>] [--json]
   git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--exclude-self] [--skip-empty-reviews] [--json]
   git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--events-from -] [--account <LOGIN>] [--state-dir <DIR>] [--json]
+  git-feedback show <URL> --event <ID> [--account <LOGIN>] [--state-dir <DIR>] [--json]
   git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--skip-empty-reviews] [--skip-head-changed] [--json]
   git-feedback store path [--state-dir <DIR>]
   git-feedback store reset [--target <URL>] [--state-dir <DIR>]
@@ -19,6 +20,7 @@ Commands:
   reconcile     collect feedback and establish the baseline
   snapshot      export a stored collection to a file
   inbox         list pending events for a consumer
+  show          fetch one event's stored object content (body, state, comments)
   ack           acknowledge delivered event IDs
   wait          block until new events arrive or --timeout elapses (bounded polling)
   store path    print the resolved store directory; never opens the store

@@ -58,6 +58,7 @@ git-feedback reconcile <URL> [--head <SHA>] [--account <LOGIN>] [--state-dir <DI
 git-feedback snapshot <URL> --snapshot <ID> --output <FILE> [--account <LOGIN>] [--state-dir <DIR>] [--json]
 git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--exclude-self] [--skip-empty-reviews] [--json]
 git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--events-from -] [--account <LOGIN>] [--state-dir <DIR>] [--json]
+git-feedback show <URL> --event <ID> [--account <LOGIN>] [--state-dir <DIR>] [--json]
 git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--skip-empty-reviews] [--skip-head-changed] [--json]
 git-feedback store path [--state-dir <DIR>]
 git-feedback store reset [--target <URL>] [--state-dir <DIR>]
@@ -82,6 +83,13 @@ the envelope.
   target, transactionally and idempotently. Unknown or out-of-scope IDs reject
   the whole request. There is no acknowledge-all or acknowledge-latest
   operation.
+- `show` — fetch one event's stored object content (the thread with its
+  comments, the review with its state and body, or the top-level comment) as
+  recorded in the event's snapshot. Local store access only: no authentication,
+  no network, and it acknowledges nothing. The event record renders in
+  `events`, so a show envelope can be piped into `ack --events-from -`. This
+  lets a loop verify a review-body completion marker without dropping to the
+  forge API.
 - `wait` — bounded waiting. It owns polling only when used standalone; a
   controller uses `reconcile` and `inbox` instead.
 - `store` — store lifecycle. `store path` prints the resolved store directory
