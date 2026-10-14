@@ -15,8 +15,10 @@ envelope field below is not enough.
 
 ## Version gate
 
-Check that `git-feedback --version` reports 0.5.0 or later. If it is older, or
-the store directory is not writable, fetch the same data through the forge API
+Check that `git-feedback --version` reports 0.5.0 or later. A non-semver version
+string (for example `git-feedback dev` from a source build) counts as present.
+If the version is older, or the store directory is not writable, fetch the same
+data through the forge API
 (`gh pr view --json reviews,comments`, `gh api`) and keep the same
 triage-before-reply discipline by hand.
 
@@ -116,8 +118,9 @@ events recorded before the consumer existed.
       threads the ledger lacks go back to triage. The check is a jq diff, not a
       re-read.
 
-Record `snapshot.id`, the snapshot `head`, and `attempt.at` in the ledger as
-the fetch identity.
+Record `snapshot.id`, `observed_head`, and `attempt.at` in the ledger as
+the fetch identity. (`observed_head` is the reconcile envelope's top-level
+field; the export file's top-level `head` matches it.)
 
 ## Watch shape: block until feedback changes
 
