@@ -15,12 +15,26 @@ import (
 // deferred status; unexpected operational errors as the error envelope.
 func handleReconcile(ctx context.Context, inv Invocation) (Result, error) {
 	// Host validation happens before any credential lookup.
-	if _, err := parseTarget(inv); err != nil {
-		return Result{}, err
+	target, terr := parseTarget(inv)
+	if terr != nil {
+		return Result{}, terr
+	}
+	busy := func() Result {
+		// Another git-feedback process holds the store's write lock. The
+		// contract's busy outcome covers this; it is not an operational
+		// failure.
+		r := Result{Command: inv.Command, Status: StatusBusy}
+		r.Target = envelopeTarget(target)
+		return r
 	}
 	clk := newClock()
 	st, err := openStore(inv, clk)
 	if err != nil {
+		// Migration/open contention: a concurrent process holds the write
+		// lock past the busy timeout.
+		if store.IsLockError(err) {
+			return busy(), nil
+		}
 		return Result{}, err
 	}
 	defer st.Close()
@@ -36,13 +50,9 @@ func handleReconcile(ctx context.Context, inv Invocation) (Result, error) {
 	})
 	if err != nil {
 		if reconcileContention(err) {
-			// Another git-feedback process holds the store's write lock.
-			// The contract's busy outcome covers this; it is not an
-			// operational failure. parseTarget was validated above.
-			target, _ := parseTarget(inv)
-			r := Result{Command: inv.Command, Status: StatusBusy}
-			r.Target = envelopeTarget(target)
-			return r, nil
+			// A live foreign lease is exactly the busy outcome; a raw lock
+			// failure is the same contention surfaced by the engine.
+			return busy(), nil
 		}
 		return Result{}, mapReconcileError(err)
 	}

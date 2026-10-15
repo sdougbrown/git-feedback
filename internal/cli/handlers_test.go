@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -1245,5 +1246,45 @@ func TestReconcileContentionClassification(t *testing.T) {
 	}
 	if reconcileContention(errors.New("no store error here")) {
 		t.Error("non-store errors are not contention")
+	}
+}
+
+// A store write lock held past the busy timeout makes the lease acquisition
+// fail with a lock error. The contention branch must classify it as the
+// retryable busy envelope (exit 0), not a store_error envelope.
+func TestReconcileLockContentionMapsToBusyEnvelope(t *testing.T) {
+	dir, _, _ := handlerEnv(t)
+
+	raw, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "feedback.db")+"?_txlock=immediate&_pragma=busy_timeout(1000)&_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	tx, err := raw.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`INSERT INTO leases (host, account, token, expiry_ms) VALUES ('github.com', '', 'holder', 9e12)`); err != nil {
+		t.Fatal(err)
+	}
+	// Hold the write lock past the store's busy timeout while reconcile runs.
+	done := make(chan struct{})
+	go func() {
+		time.Sleep(6 * time.Second)
+		tx.Rollback()
+		close(done)
+	}()
+
+	code, env, _ := runCLI(t, []string{"reconcile", "--state-dir", dir, handlerURL})
+	<-done
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	if env["status"] != "busy" {
+		t.Errorf("status = %v, want busy (lock contention, not store_error)", env["status"])
+	}
+	if env["error"] != nil {
+		t.Errorf("error = %v, want null for a busy envelope", env["error"])
 	}
 }
