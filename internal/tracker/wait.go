@@ -455,10 +455,16 @@ func (e *Engine) storeFor(clk clock.Clock, remaining time.Duration) (*Engine, fu
 }
 
 // clampBusy bounds the SQLite busy timeout by the remaining deadline.
+// An expired deadline uses the floor: a busy wait can never outlive the
+// deadline it is bounded by, so the open fails fast and the wait loop's
+// own deadline handling reports the timeout.
 func clampBusy(remaining time.Duration) time.Duration {
 	const ceiling = 5 * time.Second
 	const floor = 10 * time.Millisecond
-	if remaining <= 0 || remaining > ceiling {
+	if remaining <= 0 {
+		return floor
+	}
+	if remaining > ceiling {
 		return ceiling
 	}
 	if remaining < floor {

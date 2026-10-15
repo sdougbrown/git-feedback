@@ -44,9 +44,14 @@ func TestAcquireAccountLeaseSurvivesConcurrentCommit(t *testing.T) {
 	}
 
 	done := make(chan error, 1)
+	launch := time.Now()
 	go func() {
 		done <- st.AcquireAccountLease(context.Background(), "github.com", "me", "mine", time.Minute, time.Now())
 	}()
+	// Give the acquire time to reach BEGIN IMMEDIATE before releasing the
+	// lock, so the contention window is actually exercised. If the acquire
+	// returned before the commit, it raced past the window and the test
+	// proved nothing.
 	time.Sleep(100 * time.Millisecond)
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
@@ -54,6 +59,9 @@ func TestAcquireAccountLeaseSurvivesConcurrentCommit(t *testing.T) {
 
 	select {
 	case err := <-done:
+		if elapsed := time.Since(launch); elapsed < 90*time.Millisecond {
+			t.Fatalf("acquire returned after %v without contending on the lock; the test did not exercise the contention window", elapsed)
+		}
 		var se *Error
 		if !errors.As(err, &se) {
 			t.Fatalf("want a store error, got %v", err)
