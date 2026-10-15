@@ -35,6 +35,18 @@ func handleReconcile(ctx context.Context, inv Invocation) (Result, error) {
 		Account: inv.Flags["account"],
 	})
 	if err != nil {
+		if reconcileContention(err) {
+			// Another git-feedback process holds the store's write lock.
+			// The contract's busy outcome covers this; it is not an
+			// operational failure.
+			target, terr := parseTarget(inv)
+			if terr != nil {
+				return Result{}, mapReconcileError(terr)
+			}
+			r := Result{Command: inv.Command, Status: StatusBusy}
+			r.Target = envelopeTarget(target)
+			return r, nil
+		}
 		return Result{}, mapReconcileError(err)
 	}
 
@@ -70,6 +82,17 @@ func fresh(f tracker.Freshness) Freshness {
 		SnapshotObservedAt: stamp(f.SnapshotObservedAt),
 		Stale:              f.Stale,
 	}
+}
+
+// reconcileContention reports whether err is store lock contention —
+// another git-feedback process holding the store's write lease. The busy
+// outcome (retryable by design) applies; it is not an operational failure.
+func reconcileContention(err error) bool {
+	var se *store.Error
+	if !errors.As(err, &se) {
+		return false
+	}
+	return se.Code == store.CodeLeaseBusy || store.IsLockError(err)
 }
 
 // mapReconcileError maps reconciliation failures onto envelope errors.

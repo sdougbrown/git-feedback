@@ -377,3 +377,13 @@ func TestAuthorChangeNotObservedCarriesNewAuthor(t *testing.T) {
 		t.Fatal("not_observed event for t1 missing")
 	}
 }
+
+// The lease transaction must take the write lock at BEGIN (_txlock=immediate):
+// a deferred read→write upgrade fails immediately with SQLITE_BUSY when
+// another writer commits after the snapshot began, bypassing busy_timeout.
+func TestDSNUsesImmediateTxLock(t *testing.T) {
+	d := dsn(filepath.Join(t.TempDir(), DBFilename), 0)
+	if !strings.Contains(d, "_txlock=immediate") {
+		t.Errorf("dsn %q missing _txlock=immediate", d)
+	}
+}

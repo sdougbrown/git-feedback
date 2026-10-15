@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1226,5 +1227,23 @@ func TestWaitStatusLineOnStderr(t *testing.T) {
 	want := "git-feedback wait: status=events events=4 has_more=false\n"
 	if !strings.Contains(stderr, want) {
 		t.Errorf("stderr = %q, want it to contain %q", stderr, want)
+	}
+}
+
+func TestReconcileContentionClassification(t *testing.T) {
+	if !reconcileContention(&store.Error{Code: store.CodeLeaseBusy, Message: "lease for github.com/sdougbrown is live"}) {
+		t.Error("lease_busy must classify as contention")
+	}
+	if !reconcileContention(&store.Error{Code: store.CodeStore, Message: "acquire lease: database is locked (5) (SQLITE_BUSY)"}) {
+		t.Error("a raw SQLITE_BUSY lease failure must classify as contention")
+	}
+	if reconcileContention(&store.Error{Code: store.CodeStore, Message: "read stream: something else"}) {
+		t.Error("a plain store error is not contention")
+	}
+	if reconcileContention(&store.Error{Code: store.CodeStoreCorrupt, Message: "corrupt"}) {
+		t.Error("corruption is not contention")
+	}
+	if reconcileContention(errors.New("no store error here")) {
+		t.Error("non-store errors are not contention")
 	}
 }
