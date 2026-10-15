@@ -20,8 +20,6 @@ const (
 	AcquireDeferredDue
 	// AcquireDeferredGated means a rate gate blocks collection.
 	AcquireDeferredGated
-	// AcquireBusy means another caller holds the required lease.
-	AcquireBusy
 )
 
 // AcquireResult reports the outcome of the atomic acquisition check.

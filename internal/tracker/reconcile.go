@@ -222,8 +222,9 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 		return Result{}, err
 	}
 	switch acq.Outcome {
-	case store.AcquireBusy:
-		return Result{Status: StatusBusy, Target: target}, nil
+	// A live foreign lease surfaces as a CodeLeaseBusy store error (the
+	// deferred upgrade path in acquireLeaseTx), not as an outcome; the
+	// reconcile handler classifies it as the busy envelope.
 	case store.AcquireDeferredDue, store.AcquireDeferredGated:
 		res := e.deferredResult(ctx, target, account, acq.BlockedUntil)
 		res.Session = sess
