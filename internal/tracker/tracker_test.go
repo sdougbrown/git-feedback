@@ -926,3 +926,21 @@ func TestFreshnessStaleUsesMinInterval(t *testing.T) {
 		t.Fatalf("not stale at +61s, want stale: %+v", f)
 	}
 }
+
+func TestClampBusyBoundsWaitByRemaining(t *testing.T) {
+	cases := []struct {
+		remaining time.Duration
+		want      time.Duration
+	}{
+		{remaining: -time.Second, want: 10 * time.Millisecond}, // expired: fail fast
+		{remaining: 0, want: 10 * time.Millisecond},
+		{remaining: 10 * time.Millisecond, want: 10 * time.Millisecond},
+		{remaining: 2 * time.Second, want: 2 * time.Second},
+		{remaining: 90 * time.Second, want: 5 * time.Second},
+	}
+	for _, c := range cases {
+		if got := clampBusy(c.remaining); got != c.want {
+			t.Errorf("clampBusy(%v) = %v, want %v", c.remaining, got, c.want)
+		}
+	}
+}

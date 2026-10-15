@@ -3,7 +3,9 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1227,4 +1229,64 @@ func TestWaitStatusLineOnStderr(t *testing.T) {
 	if !strings.Contains(stderr, want) {
 		t.Errorf("stderr = %q, want it to contain %q", stderr, want)
 	}
+}
+
+func TestReconcileContentionClassification(t *testing.T) {
+	if !reconcileContention(&store.Error{Code: store.CodeLeaseBusy, Message: "lease for github.com/sdougbrown is live"}) {
+		t.Error("lease_busy must classify as contention")
+	}
+	if !reconcileContention(&store.Error{Code: store.CodeStore, Message: "acquire lease: database is locked (5) (SQLITE_BUSY)"}) {
+		t.Error("a raw SQLITE_BUSY lease failure must classify as contention")
+	}
+	if reconcileContention(&store.Error{Code: store.CodeStore, Message: "read stream: something else"}) {
+		t.Error("a plain store error is not contention")
+	}
+	if reconcileContention(&store.Error{Code: store.CodeStoreCorrupt, Message: "corrupt"}) {
+		t.Error("corruption is not contention")
+	}
+	if reconcileContention(errors.New("no store error here")) {
+		t.Error("non-store errors are not contention")
+	}
+}
+
+// A store write lock held past the busy timeout makes the lease acquisition
+// fail with a lock error. The contention branch must classify it as the
+// retryable busy envelope (exit 0), not a store_error envelope.
+func TestReconcileLockContentionMapsToBusyEnvelope(t *testing.T) {
+	dir, _, _ := handlerEnv(t)
+
+	raw, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "feedback.db")+"?_txlock=immediate&_pragma=busy_timeout(1000)&_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	tx, err := raw.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`INSERT INTO leases (host, account, token, expiry_ms) VALUES ('github.com', '', 'holder', 9e12)`); err != nil {
+		t.Fatal(err)
+	}
+	// Hold the write lock well past the store's busy timeout (5s) while
+	// reconcile runs, so the lock is guaranteed held for the entire wait
+	// even if the test process is descheduled. The rollback happens after
+	// the assertions; the deferred raw.Close cleans up the rest.
+	code, env, _ := runCLI(t, []string{"reconcile", "--state-dir", dir, handlerURL})
+	if code != 0 {
+		tx.Rollback()
+		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	if env["status"] != "busy" {
+		tx.Rollback()
+		t.Errorf("status = %v, want busy (lock contention, not store_error)", env["status"])
+	}
+	if env["error"] != nil {
+		tx.Rollback()
+		t.Errorf("error = %v, want null for a busy envelope", env["error"])
+	}
+	// This test pins the open/migration contention branch (the lease acquire
+	// runs later, after admission); the engine-lease branch is covered by the
+	// reconcileContention classifier test.
+	tx.Rollback()
 }

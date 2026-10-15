@@ -25,7 +25,12 @@ func dsn(path string, busyTimeoutMS int) string {
 	if busyTimeoutMS <= 0 {
 		busyTimeoutMS = DefaultBusyTimeout
 	}
-	return fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(1)", escapeDSNPath(path), busyTimeoutMS)
+	// _txlock=immediate: a deferred transaction that upgrades read→write
+	// fails immediately with SQLITE_BUSY when another writer commits after
+	// this connection's read snapshot began (snapshot invalidation bypasses
+	// the busy handler). Taking the write lock at BEGIN lets busy_timeout
+	// serialize cross-process contention instead.
+	return fmt.Sprintf("file:%s?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(1)", escapeDSNPath(path), busyTimeoutMS)
 }
 
 // escapeDSNPath percent-encodes each path segment so a state directory whose
@@ -80,6 +85,14 @@ func openDatabase(stateDir string, busyTimeoutMS int) (*sql.DB, string, error) {
 		}
 	}
 	return db, path, nil
+}
+
+// IsLockError reports whether err is a transient SQLite lock or busy error,
+// such as a concurrent process holding the WAL write lock longer than the
+// busy timeout, or a snapshot-invalidation upgrade failure. These are
+// lease contention (the busy outcome), not corruption.
+func IsLockError(err error) bool {
+	return isLockError(err)
 }
 
 // isLockError reports whether err is a transient SQLite lock or busy error,
