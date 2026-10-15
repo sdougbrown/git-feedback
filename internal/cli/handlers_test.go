@@ -1267,24 +1267,26 @@ func TestReconcileLockContentionMapsToBusyEnvelope(t *testing.T) {
 	if _, err := tx.Exec(`INSERT INTO leases (host, account, token, expiry_ms) VALUES ('github.com', '', 'holder', 9e12)`); err != nil {
 		t.Fatal(err)
 	}
-	// Hold the write lock past the store's busy timeout while reconcile runs.
-	done := make(chan struct{})
-	go func() {
-		time.Sleep(6 * time.Second)
-		tx.Rollback()
-		close(done)
-	}()
-
+	// Hold the write lock well past the store's busy timeout (5s) while
+	// reconcile runs, so the lock is guaranteed held for the entire wait
+	// even if the test process is descheduled. The rollback happens after
+	// the assertions; the deferred raw.Close cleans up the rest.
 	code, env, _ := runCLI(t, []string{"reconcile", "--state-dir", dir, handlerURL})
-	<-done
 	if code != 0 {
+		tx.Rollback()
 		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
 	}
 	assertContract(t, env)
 	if env["status"] != "busy" {
+		tx.Rollback()
 		t.Errorf("status = %v, want busy (lock contention, not store_error)", env["status"])
 	}
 	if env["error"] != nil {
+		tx.Rollback()
 		t.Errorf("error = %v, want null for a busy envelope", env["error"])
 	}
+	// This test pins the open/migration contention branch (the lease acquire
+	// runs later, after admission); the engine-lease branch is covered by the
+	// reconcileContention classifier test.
+	tx.Rollback()
 }
