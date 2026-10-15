@@ -38,11 +38,8 @@ func handleReconcile(ctx context.Context, inv Invocation) (Result, error) {
 		if reconcileContention(err) {
 			// Another git-feedback process holds the store's write lock.
 			// The contract's busy outcome covers this; it is not an
-			// operational failure.
-			target, terr := parseTarget(inv)
-			if terr != nil {
-				return Result{}, mapReconcileError(terr)
-			}
+			// operational failure. parseTarget was validated above.
+			target, _ := parseTarget(inv)
 			r := Result{Command: inv.Command, Status: StatusBusy}
 			r.Target = envelopeTarget(target)
 			return r, nil
