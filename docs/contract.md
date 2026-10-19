@@ -77,8 +77,9 @@ identically for both target kinds.
   not collected in this version: that costs one extra request per cycle plus
   a new snapshot field and event kind, so it is deliberately out of scope.
 - **Envelope.** `observed_head` and `expected_head` are always `null` for an
-  issue target, and `reviewer_completion` stays `"unknown"`. `snapshot.head` is
-  empty and `status` never becomes `head_changed`. An exported snapshot
+  issue target, and `reviewer_completion` stays `"unknown"`. The stored
+  snapshot's head is empty (the export object's `head` field) and
+  `status` never becomes `head_changed`. An exported snapshot
   (`snapshot` command) adds `"kind": "issue"` to its target object; pull
   request exports are byte-identical to before.
 - **Pull-request-only options are accepted no-ops.** `--head`,

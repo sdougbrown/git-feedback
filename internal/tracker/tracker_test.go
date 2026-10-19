@@ -836,6 +836,25 @@ func TestReconcileKindMismatchFailsFast(t *testing.T) {
 			t.Fatalf("adapter.Collect invoked %d times, want 0 (check must fire before collection)", adapter.collects)
 		}
 	})
+
+	t.Run("pinned head is dropped on an issue target", func(t *testing.T) {
+		e := newEnv(t)
+		seedPRStream(e)
+		adapter := &countingAdapter{}
+		e.eng.NewAdapter = func(svcs Services) forge.Adapter { return adapter }
+		sess := &fakeSession{login: "alice"}
+		// The Reconcile-side normalizeHeadPin drops the pin on an issue
+		// target; the pin never reaches collection. The kind flip is the
+		// only observable outcome.
+		_, err := e.eng.Reconcile(context.Background(), ReconcileInput{URL: issueURL, Head: "cafecafe", Session: sess})
+		var se *store.Error
+		if !errors.As(err, &se) || se.Code != store.CodeTargetKindMismatch {
+			t.Fatalf("reconcile: expected CodeTargetKindMismatch, got %v", err)
+		}
+		if adapter.collects != 0 {
+			t.Fatalf("adapter.Collect invoked %d times, want 0 (the pin never reaches collection)", adapter.collects)
+		}
+	})
 }
 
 // TestReconcileAdmitBusyDefersKindFlip: a kind-flipped URL whose

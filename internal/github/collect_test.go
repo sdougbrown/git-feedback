@@ -201,6 +201,9 @@ func TestCollectAllPages(t *testing.T) {
 	if inv.Head != "1111111111111111111111111111111111111111" {
 		t.Fatalf("unexpected head %q", inv.Head)
 	}
+	if !inv.Snapshot.HasHead {
+		t.Fatal("snapshot HasHead = false, want true for a pull request target")
+	}
 	// Synthetic target object plus one object per feedback item.
 	if len(inv.Objects) != 152 {
 		t.Fatalf("want 152 objects, got %d", len(inv.Objects))
@@ -248,6 +251,9 @@ func TestCollectIssueTargetOnlyComments(t *testing.T) {
 	}
 	if inv.Head != "" || inv.Snapshot.Head != "" {
 		t.Fatalf("issue target head = %q/%q, want empty", inv.Head, inv.Snapshot.Head)
+	}
+	if inv.Snapshot.HasHead {
+		t.Fatal("snapshot HasHead = true, want false for an issue target")
 	}
 	if len(inv.Snapshot.Threads) != 0 || len(inv.Snapshot.Reviews) != 0 {
 		t.Fatalf("threads/reviews = %d/%d, want 0/0", len(inv.Snapshot.Threads), len(inv.Snapshot.Reviews))

@@ -349,7 +349,7 @@ func boolToInt(b bool) int {
 // kindMismatchMessage builds the kind-flip rejection message, pointing at
 // `store reset --target` as the remedy.
 func kindMismatchMessage(fresh, stored forge.Target) string {
-	return fmt.Sprintf("target %s is stored as a %s but the URL names a %s; run `store reset --target <URL>` to re-baseline", fresh.ID, kindName(stored), kindName(fresh))
+	return fmt.Sprintf("target %s is stored as %s but the URL names %s; run `store reset --target <URL>` to re-baseline", fresh.ID, kindName(stored), kindName(fresh))
 }
 
 // kindName renders a target's kind for the kind-flip rejection message.

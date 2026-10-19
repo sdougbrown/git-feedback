@@ -231,12 +231,16 @@ func TestExportIssueTargetCarriesKind(t *testing.T) {
 	}
 	var doc struct {
 		Target forge.Target `json:"target"`
+		Head   string       `json:"head"`
 	}
 	if err := json.Unmarshal(b, &doc); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if !doc.Target.IsIssue() {
 		t.Errorf("target kind = %q, want issue", doc.Target.Kind)
+	}
+	if doc.Head != "" {
+		t.Errorf("exported head = %q, want empty for an issue target", doc.Head)
 	}
 	if res.Counts["comment"] != 1 {
 		t.Errorf("comment count = %d, want 1", res.Counts["comment"])

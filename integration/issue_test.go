@@ -178,3 +178,55 @@ func TestIssueKindFlipRemedyLoop(t *testing.T) {
 		t.Fatalf("the conversation comments endpoint was never read after the PR seed")
 	}
 }
+
+// TestIssueKindFlipReverse: the reverse kind flip — an issue stream is
+// seeded, a /pull/N reconcile (and inbox) for the same number is
+// rejected as a usage error (exit 2) naming the stored kind.
+func TestIssueKindFlipReverse(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, map[string]string{"GIT_FEEDBACK_MIN_INTERVAL": "100ms"})
+	dir := testState(t)
+	tagged := filepath.Join(repoRoot, "bin", "git-feedback-test")
+
+	prURL := "https://github.com/owner/name/pull/9"
+
+	// 1. Seed an issue stream.
+	assertStatusUpdated(t, runOK(t, env, 90*time.Second, issueReconcileArgs(dir)...))
+
+	// 2. A /pull/N reconcile for the same number is rejected as a
+	// usage error (exit 2) naming the stored kind.
+	res := runCLI(boundedCtx(t), t, tagged, env, append([]string{"reconcile", prURL, "--json"}, stateArg(dir)...)...)
+	if res.Code != 2 {
+		t.Fatalf("exit = %d, want 2 (stderr=%q stdout=%s)", res.Code, res.Stderr, res.Stdout)
+	}
+	if s := statusOf(t, res.Env); s != "error" {
+		t.Fatalf("status = %q, want error", s)
+	}
+	if code := errorCode(t, res.Env); code != "usage" {
+		t.Fatalf("error.code = %q, want usage", code)
+	}
+	var e struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(res.Env["error"], &e); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if !strings.Contains(e.Message, "stored as issue") {
+		t.Fatalf("error.message = %q, want it to name the stored kind (issue)", e.Message)
+	}
+	if !strings.Contains(e.Message, "store reset --target") {
+		t.Fatalf("error.message = %q, want the kind-flip remedy", e.Message)
+	}
+
+	// 3. The local read path (inbox) rejects the same flip too.
+	res = runCLI(boundedCtx(t), t, tagged, env, append([]string{"inbox", prURL, "--consumer", consumer, "--json"}, stateArg(dir)...)...)
+	if res.Code != 2 {
+		t.Fatalf("exit = %d, want 2 (stderr=%q stdout=%s)", res.Code, res.Stderr, res.Stdout)
+	}
+	if err := json.Unmarshal(res.Env["error"], &e); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if !strings.Contains(e.Message, "stored as issue") {
+		t.Fatalf("error.message = %q, want it to name the stored kind (issue)", e.Message)
+	}
+}
