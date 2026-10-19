@@ -709,6 +709,35 @@ func TestWaitFatalErrorFailsFast(t *testing.T) {
 			t.Fatalf("wait: took %v, expected to run until the 2s deadline", elapsed)
 		}
 	})
+
+	t.Run("CodeTargetKindMismatch fails fast", func(t *testing.T) {
+		e := newEnvAt(t, time.Now().Add(-time.Hour))
+		// Seed a PR stream.
+		_, err := e.st.Publish(context.Background(), store.PublishInput{
+			Target:  forge.NewTarget("github", "github.com", "owner/name", 7, testURL),
+			Account: "alice",
+			Snapshot: &forge.Snapshot{
+				Head:           "headA",
+				CollectedStart: time.Now().Add(-time.Minute),
+				CollectedEnd:   time.Now(),
+			},
+		})
+		if err != nil {
+			t.Fatalf("seed PR stream: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		start := time.Now()
+		_, err = e.eng.Wait(ctx, WaitInput{URL: "https://github.com/owner/name/issues/7", Consumer: "c"})
+		elapsed := time.Since(start)
+		var se *store.Error
+		if !errors.As(err, &se) || se.Code != store.CodeTargetKindMismatch {
+			t.Fatalf("wait: expected CodeTargetKindMismatch, got %v", err)
+		}
+		if elapsed >= time.Second {
+			t.Fatalf("wait: took %v, expected immediate failure before the 2s deadline", elapsed)
+		}
+	})
 }
 
 // TestWaitSignalCancellationReturnsErrorOutcome: a signal-like
@@ -918,11 +947,11 @@ func TestFreshnessStaleUsesMinInterval(t *testing.T) {
 		t.Fatalf("status = %s, want updated", res.Status)
 	}
 	e.clk.Advance(30 * time.Second)
-	if f := e.eng.freshness(context.Background(), testTargetID, "alice"); f.Stale {
+	if f := e.eng.freshness(context.Background(), forge.NewTarget("github", "github.com", "owner/name", 7, testURL), "alice"); f.Stale {
 		t.Fatalf("stale at +30s, want fresh: %+v", f)
 	}
 	e.clk.Advance(31 * time.Second)
-	if f := e.eng.freshness(context.Background(), testTargetID, "alice"); !f.Stale {
+	if f := e.eng.freshness(context.Background(), forge.NewTarget("github", "github.com", "owner/name", 7, testURL), "alice"); !f.Stale {
 		t.Fatalf("not stale at +61s, want stale: %+v", f)
 	}
 }

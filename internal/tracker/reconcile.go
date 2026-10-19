@@ -289,8 +289,8 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 				HasObservedHead: observed != "",
 				ExpectedHead:    expected,
 				HasExpectedHead: expected != "",
-				Snapshot:        e.currentSnapshot(ctx, target.ID, account),
-				Freshness:       e.freshness(ctx, target.ID, account),
+				Snapshot:        e.currentSnapshot(ctx, target, account),
+				Freshness:       e.freshness(ctx, target, account),
 				Attempt:         att,
 				Session:         sess,
 				BlockedUntil:    e.nextDueOr(),
@@ -389,9 +389,9 @@ func (e *Engine) publish(ctx context.Context, target forge.Target, host, account
 		HasAccount:      true,
 		ObservedHead:    coll.Snapshot.Head,
 		HasObservedHead: coll.Snapshot.Head != "",
-		Snapshot:        e.currentSnapshot(ctx, target.ID, account),
+		Snapshot:        e.currentSnapshot(ctx, target, account),
 		Attempt:         e.latestAttempt(ctx, target.ID, account),
-		Freshness:       e.freshness(ctx, target.ID, account),
+		Freshness:       e.freshness(ctx, target, account),
 		Session:         sess,
 	}, nil
 }
@@ -405,8 +405,8 @@ func (e *Engine) streamID(ctx context.Context, targetID, account string) (int64,
 }
 
 // currentSnapshot returns the stream's current snapshot summary, or nil.
-func (e *Engine) currentSnapshot(ctx context.Context, targetID, account string) *store.SnapshotSummary {
-	sum, ok, err := e.Store.CurrentSnapshot(ctx, targetID, account)
+func (e *Engine) currentSnapshot(ctx context.Context, target forge.Target, account string) *store.SnapshotSummary {
+	sum, ok, err := e.Store.CurrentSnapshot(ctx, target.ID, account, target)
 	if err != nil || !ok {
 		return nil
 	}
@@ -423,8 +423,8 @@ func (e *Engine) latestAttempt(ctx context.Context, targetID, account string) *s
 }
 
 // freshness computes the freshness inputs for the stream's current snapshot.
-func (e *Engine) freshness(ctx context.Context, targetID, account string) Freshness {
-	sum, ok, err := e.Store.CurrentSnapshot(ctx, targetID, account)
+func (e *Engine) freshness(ctx context.Context, target forge.Target, account string) Freshness {
+	sum, ok, err := e.Store.CurrentSnapshot(ctx, target.ID, account, target)
 	if err != nil || !ok {
 		return Freshness{}
 	}
@@ -445,9 +445,9 @@ func (e *Engine) deferredResult(ctx context.Context, target forge.Target, accoun
 	}
 	if account != "" {
 		res.Account, res.HasAccount = account, true
-		res.Snapshot = e.currentSnapshot(ctx, target.ID, account)
+		res.Snapshot = e.currentSnapshot(ctx, target, account)
 		res.Attempt = e.latestAttempt(ctx, target.ID, account)
-		res.Freshness = e.freshness(ctx, target.ID, account)
+		res.Freshness = e.freshness(ctx, target, account)
 	}
 	return res
 }

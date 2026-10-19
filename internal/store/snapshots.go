@@ -612,24 +612,35 @@ type SnapshotSummary struct {
 }
 
 // CurrentSnapshot returns the current snapshot summary for one stream, or
-// false when the stream has no snapshot (or does not exist).
-func (s *Store) CurrentSnapshot(ctx context.Context, targetID, account string) (SnapshotSummary, bool, error) {
+// false when the stream has no snapshot (or does not exist). When the
+// stored target's kind differs from the requested target's kind, it
+// returns CodeTargetKindMismatch.
+func (s *Store) CurrentSnapshot(ctx context.Context, targetID, account string, requested forge.Target) (SnapshotSummary, bool, error) {
 	var sum SnapshotSummary
 	var streamID, snapID int64
 	var start, end, observedAt sql.NullString
+	var targetJSON string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT t.stream_id, s.id, s.head, s.collected_start, s.collected_end,
 		       (SELECT MAX(o.observed_at) FROM observations o
-		         WHERE o.stream_id = t.stream_id AND o.snapshot_id = s.id)
+		         WHERE o.stream_id = t.stream_id AND o.snapshot_id = s.id),
+		       t.target_json
 		FROM targets t JOIN snapshots s ON s.id = t.current_snapshot_id
 		WHERE t.target_id = ? AND t.account = ?`,
 		targetID, forge.CanonicalAccount(account)).Scan(
-		&streamID, &snapID, &sum.Head, &start, &end, &observedAt)
+		&streamID, &snapID, &sum.Head, &start, &end, &observedAt, &targetJSON)
 	if err == sql.ErrNoRows {
 		return SnapshotSummary{}, false, nil
 	}
 	if err != nil {
 		return SnapshotSummary{}, false, &Error{Code: CodeStore, Message: fmt.Sprintf("read current snapshot: %v", err)}
+	}
+	var stored forge.Target
+	if err := json.Unmarshal([]byte(targetJSON), &stored); err != nil {
+		return SnapshotSummary{}, false, &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("decode stored target: %v", err)}
+	}
+	if stored.IsIssue() != requested.IsIssue() {
+		return SnapshotSummary{}, false, &Error{Code: CodeTargetKindMismatch, Message: kindMismatchMessage(requested, stored)}
 	}
 	stamps := []struct {
 		col string

@@ -314,7 +314,7 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 	if len(page.Events) == 0 {
 		return WaitResult{}, false, nil
 	}
-	sum, ok, err := eng.Store.CurrentSnapshot(ctx, target.ID, account)
+	sum, ok, err := eng.Store.CurrentSnapshot(ctx, target.ID, account, target)
 	if err != nil {
 		if isStoreOpenError(err) {
 			return WaitResult{}, false, errTransientStore
@@ -407,8 +407,8 @@ func (e *Engine) timeoutResult(eng *Engine, target forge.Target, account string,
 	res := WaitResult{Status: StatusTimeout, Target: target}
 	if account != "" {
 		res.Account, res.HasAccount = account, true
-		res.Snapshot = eng.currentSnapshot(context.Background(), target.ID, account)
-		res.Freshness = eng.freshness(context.Background(), target.ID, account)
+		res.Snapshot = eng.currentSnapshot(context.Background(), target, account)
+		res.Freshness = eng.freshness(context.Background(), target, account)
 	}
 	if in.Head != "" {
 		res.ExpectedHead, res.HasExpectedHead = in.Head, true

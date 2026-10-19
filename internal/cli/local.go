@@ -136,7 +136,7 @@ func localEnvelope(ctx context.Context, command string, st *store.Store, clk clo
 	acct := account
 	r.Account = &acct
 
-	if sum, ok, err := st.CurrentSnapshot(ctx, t.ID, account); err != nil {
+	if sum, ok, err := st.CurrentSnapshot(ctx, t.ID, account, t); err != nil {
 		return r, mapStoreError(err)
 	} else if ok {
 		r.Snapshot = snapshotEnvelope(sum)
