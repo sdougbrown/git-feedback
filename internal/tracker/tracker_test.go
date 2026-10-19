@@ -837,15 +837,16 @@ func TestReconcileKindMismatchFailsFast(t *testing.T) {
 		}
 	})
 
-	t.Run("pinned head is dropped on an issue target", func(t *testing.T) {
+	t.Run("kind flip fails fast even with a pinned head", func(t *testing.T) {
 		e := newEnv(t)
 		seedPRStream(e)
 		adapter := &countingAdapter{}
 		e.eng.NewAdapter = func(svcs Services) forge.Adapter { return adapter }
 		sess := &fakeSession{login: "alice"}
-		// The Reconcile-side normalizeHeadPin drops the pin on an issue
-		// target; the pin never reaches collection. The kind flip is the
-		// only observable outcome.
+		// The kind-flip guard with a pinned head supplied (in.Head set) —
+		// a distinct input path over the "mismatch fails fast" subtest.
+		// The guard fires before collection, so the pin never reaches the
+		// adapter.
 		_, err := e.eng.Reconcile(context.Background(), ReconcileInput{URL: issueURL, Head: "cafecafe", Session: sess})
 		var se *store.Error
 		if !errors.As(err, &se) || se.Code != store.CodeTargetKindMismatch {

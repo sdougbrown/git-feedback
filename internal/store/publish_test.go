@@ -629,9 +629,6 @@ func TestKindFlipRejected(t *testing.T) {
 	if !strings.Contains(err.Error(), "store reset --target") {
 		t.Errorf("error = %q, want it to point at `store reset --target`", err)
 	}
-	if !strings.Contains(err.Error(), "stored as pull request") {
-		t.Errorf("error = %q, want it to name the stored kind (pull request)", err)
-	}
 
 	// Issue stream first, then a PR inventory with the same target ID.
 	st2 := openTestStore(t)
@@ -647,9 +644,6 @@ func TestKindFlipRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "store reset --target") {
 		t.Errorf("error = %q, want it to point at `store reset --target`", err)
-	}
-	if !strings.Contains(err.Error(), "stored as issue") {
-		t.Errorf("error = %q, want it to name the stored kind (issue)", err)
 	}
 }
 

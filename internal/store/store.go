@@ -155,12 +155,9 @@ func (s *Store) StoredTarget(ctx context.Context, targetID, account string, requ
 	if err != nil {
 		return forge.Target{}, false, &Error{Code: CodeStore, Message: fmt.Sprintf("read stored target: %v", err)}
 	}
-	var stored forge.Target
-	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		return forge.Target{}, false, &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("decode stored target: %v", err)}
-	}
-	if stored.IsIssue() != requested.IsIssue() {
-		return forge.Target{}, false, &Error{Code: CodeTargetKindMismatch, Message: kindMismatchMessage(requested, stored)}
+	stored, err := decodeStoredTarget(raw, requested)
+	if err != nil {
+		return forge.Target{}, false, err
 	}
 	return stored, true, nil
 }

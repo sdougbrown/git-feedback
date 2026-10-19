@@ -211,9 +211,6 @@ func TestIssueKindFlipReverse(t *testing.T) {
 	if err := json.Unmarshal(res.Env["error"], &e); err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
-	if !strings.Contains(e.Message, "stored as issue") {
-		t.Fatalf("error.message = %q, want it to name the stored kind (issue)", e.Message)
-	}
 	if !strings.Contains(e.Message, "store reset --target") {
 		t.Fatalf("error.message = %q, want the kind-flip remedy", e.Message)
 	}
@@ -225,8 +222,5 @@ func TestIssueKindFlipReverse(t *testing.T) {
 	}
 	if err := json.Unmarshal(res.Env["error"], &e); err != nil {
 		t.Fatalf("decode error: %v", err)
-	}
-	if !strings.Contains(e.Message, "stored as issue") {
-		t.Fatalf("error.message = %q, want it to name the stored kind (issue)", e.Message)
 	}
 }

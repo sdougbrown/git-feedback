@@ -150,12 +150,8 @@ func resolveOrCreateStream(ctx context.Context, tx *sql.Tx, in PublishInput, acc
 		in.Target.ID, account).Scan(&streamID, &snapID, &storedJSON)
 	switch {
 	case err == nil:
-		var stored forge.Target
-		if err := json.Unmarshal([]byte(storedJSON), &stored); err != nil {
-			return 0, 0, &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("decode stored target: %v", err)}
-		}
-		if stored.IsIssue() != in.Target.IsIssue() {
-			return 0, 0, &Error{Code: CodeTargetKindMismatch, Message: kindMismatchMessage(in.Target, stored)}
+		if _, err := decodeStoredTarget(storedJSON, in.Target); err != nil {
+			return 0, 0, err
 		}
 		return streamID, snapID, nil
 	case err != sql.ErrNoRows:
@@ -358,6 +354,22 @@ func kindName(t forge.Target) string {
 		return "issue"
 	}
 	return "pull request"
+}
+
+// decodeStoredTarget decodes the stored target_json and rejects a kind
+// flip against the requested target. An undecodable target_json is
+// CodeStoreCorrupt; a stored kind that differs from the requested kind is
+// CodeTargetKindMismatch. It returns the decoded target for callers that
+// need it (e.g. StoredTarget).
+func decodeStoredTarget(targetJSON string, requested forge.Target) (forge.Target, error) {
+	var stored forge.Target
+	if err := json.Unmarshal([]byte(targetJSON), &stored); err != nil {
+		return forge.Target{}, &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("decode stored target: %v", err)}
+	}
+	if stored.IsIssue() != requested.IsIssue() {
+		return forge.Target{}, &Error{Code: CodeTargetKindMismatch, Message: kindMismatchMessage(requested, stored)}
+	}
+	return stored, nil
 }
 
 // emitEvents writes the object and target events for a changed inventory and
@@ -604,8 +616,9 @@ type SnapshotSummary struct {
 	ID   string
 	Head string
 	// HasHead reports whether the snapshot carries a head (a pull request
-	// snapshot always does; an issue snapshot never does). Consumers derive
-	// observed-head presence from this, not from Head != "".
+	// snapshot always does; an issue snapshot never does). It is derived
+	// as Head != "", mirroring the collection-time Snapshot.HasHead, and
+	// exists so consumer sites don't each re-derive the invariant.
 	HasHead        bool
 	CollectedStart time.Time
 	CollectedEnd   time.Time
@@ -639,12 +652,8 @@ func (s *Store) CurrentSnapshot(ctx context.Context, targetID, account string, r
 	if err != nil {
 		return SnapshotSummary{}, false, &Error{Code: CodeStore, Message: fmt.Sprintf("read current snapshot: %v", err)}
 	}
-	var stored forge.Target
-	if err := json.Unmarshal([]byte(targetJSON), &stored); err != nil {
-		return SnapshotSummary{}, false, &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("decode stored target: %v", err)}
-	}
-	if stored.IsIssue() != requested.IsIssue() {
-		return SnapshotSummary{}, false, &Error{Code: CodeTargetKindMismatch, Message: kindMismatchMessage(requested, stored)}
+	if _, err := decodeStoredTarget(targetJSON, requested); err != nil {
+		return SnapshotSummary{}, false, err
 	}
 	sum.HasHead = sum.Head != ""
 	stamps := []struct {
