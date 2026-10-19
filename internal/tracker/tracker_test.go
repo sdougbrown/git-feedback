@@ -249,7 +249,7 @@ func (a *completeAdapter) Authenticate(ctx context.Context, account string) (for
 }
 func (a *completeAdapter) Collect(ctx context.Context, s forge.Session, t forge.Target, o forge.CollectOptions) (forge.CollectResult, error) {
 	return forge.CollectResult{
-		Snapshot:   &forge.Snapshot{Head: "h1"},
+		Snapshot:   &forge.Snapshot{Head: "h1", HasHead: true},
 		HeadBefore: "h1",
 		HeadAfter:  "h1",
 		Complete:   true,

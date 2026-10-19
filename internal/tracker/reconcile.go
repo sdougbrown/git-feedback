@@ -161,6 +161,17 @@ func (e *Engine) services(host, account string) Services {
 	}
 }
 
+// normalizeHeadPin drops a pinned head on an issue target. A pinned
+// head is a pull-request option: an issue target has no head to
+// compare against, so the pin is ignored rather than rejected (see
+// docs/contract.md, "Issue targets").
+func normalizeHeadPin(target forge.Target, head string) string {
+	if target.IsIssue() {
+		return ""
+	}
+	return head
+}
+
 // Reconcile runs one one-shot reconciliation cycle for the URL.
 func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, error) {
 	// Unsupported hosts are rejected before credential lookup and before
@@ -169,12 +180,7 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
-	// A pinned head is a pull-request option: an issue target has no head to
-	// compare against, so the pin is ignored rather than rejected (see
-	// docs/contract.md, "Issue targets").
-	if target.IsIssue() {
-		in.Head = ""
-	}
+	in.Head = normalizeHeadPin(target, in.Head)
 	host := forge.CanonicalHost(target.Host)
 	ttl, refresh, min := e.durations()
 	token, err := newLeaseToken()
@@ -205,7 +211,7 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 	// Reconcile with a deferred/busy envelope (bootstrap-lease busy, auth
 	// backoff), deferring the detection to a later cycle. A missing stream
 	// (ok=false) is not an error.
-	if _, _, err := e.Store.CurrentSnapshot(ctx, target.ID, account, target); err != nil {
+	if _, _, err := e.Store.StoredTarget(ctx, target.ID, account, target); err != nil {
 		var se *store.Error
 		if errors.As(err, &se) && se.Code == store.CodeTargetKindMismatch {
 			return Result{}, err
@@ -402,7 +408,7 @@ func (e *Engine) publish(ctx context.Context, target forge.Target, host, account
 		Account:         account,
 		HasAccount:      true,
 		ObservedHead:    coll.Snapshot.Head,
-		HasObservedHead: coll.Snapshot.Head != "",
+		HasObservedHead: coll.Snapshot.HasHead,
 		Snapshot:        e.currentSnapshot(ctx, target, account),
 		Attempt:         e.latestAttempt(ctx, target.ID, account),
 		Freshness:       e.freshness(ctx, target, account),

@@ -137,6 +137,34 @@ func (s *Store) TargetInfo(ctx context.Context, targetID string) (forge.Target, 
 	return t, true, nil
 }
 
+// StoredTarget returns the stored target for (targetID, account), or
+// false when no stream exists. It is the light kind-flip probe: it reads
+// and decodes the stored target_json only, without the snapshot JOIN,
+// observation MAX, or object counts CurrentSnapshot carries. When the
+// stored target's kind differs from the requested target's kind, it
+// returns CodeTargetKindMismatch; an undecodable target_json is
+// CodeStoreCorrupt.
+func (s *Store) StoredTarget(ctx context.Context, targetID, account string, requested forge.Target) (forge.Target, bool, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT target_json FROM targets WHERE target_id = ? AND account = ?`,
+		targetID, forge.CanonicalAccount(account)).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return forge.Target{}, false, nil
+	}
+	if err != nil {
+		return forge.Target{}, false, &Error{Code: CodeStore, Message: fmt.Sprintf("read stored target: %v", err)}
+	}
+	var stored forge.Target
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+		return forge.Target{}, false, &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("decode stored target: %v", err)}
+	}
+	if stored.IsIssue() != requested.IsIssue() {
+		return forge.Target{}, false, &Error{Code: CodeTargetKindMismatch, Message: kindMismatchMessage(requested, stored)}
+	}
+	return stored, true, nil
+}
+
 // AccountsForTarget returns the canonical accounts that have a stream for
 // the target, ordered ascending.
 func (s *Store) AccountsForTarget(ctx context.Context, targetID string) ([]string, error) {

@@ -601,8 +601,12 @@ func threadCommentChanges(prior, cur []forge.ThreadComment) (authors []string, r
 // synthetic target object is excluded), and the last successful complete
 // observation time for the snapshot.
 type SnapshotSummary struct {
-	ID             string
-	Head           string
+	ID   string
+	Head string
+	// HasHead reports whether the snapshot carries a head (a pull request
+	// snapshot always does; an issue snapshot never does). Consumers derive
+	// observed-head presence from this, not from Head != "".
+	HasHead        bool
 	CollectedStart time.Time
 	CollectedEnd   time.Time
 	Threads        int
@@ -642,6 +646,7 @@ func (s *Store) CurrentSnapshot(ctx context.Context, targetID, account string, r
 	if stored.IsIssue() != requested.IsIssue() {
 		return SnapshotSummary{}, false, &Error{Code: CodeTargetKindMismatch, Message: kindMismatchMessage(requested, stored)}
 	}
+	sum.HasHead = sum.Head != ""
 	stamps := []struct {
 		col string
 		dst *time.Time

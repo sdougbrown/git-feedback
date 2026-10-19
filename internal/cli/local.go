@@ -142,7 +142,7 @@ func localEnvelope(ctx context.Context, command string, st *store.Store, clk clo
 		r.Snapshot = snapshotEnvelope(sum)
 		// An issue target has no head: the envelope reports null rather than
 		// an empty string.
-		if sum.Head != "" {
+		if sum.HasHead {
 			head := sum.Head
 			r.ObservedHead = &head
 		}

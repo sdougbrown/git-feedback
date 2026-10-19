@@ -109,6 +109,7 @@ func (a *Adapter) collect(ctx context.Context, tp *Transport, t forge.Target, o 
 		CollectedEnd:   a.clock.Now(),
 	}
 	inv.Snapshot.Head = headBefore
+	inv.Snapshot.HasHead = inv.Snapshot.Head != ""
 	inv.Snapshot.CollectedStart = start
 	inv.Snapshot.CollectedEnd = inv.CollectedEnd
 
