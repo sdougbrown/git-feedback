@@ -751,6 +751,93 @@ func TestFatalWaitErrorClassifiesKindMismatch(t *testing.T) {
 	}
 }
 
+// countingAdapter is a forge.Adapter that counts Collect invocations, so a
+// test can assert the early kind-flip check fires before any collection.
+// It is the lightest recording seam: it wraps nothing and only tallies.
+type countingAdapter struct {
+	collects int
+}
+
+func (a *countingAdapter) Host() string { return testHost }
+func (a *countingAdapter) ParseTarget(raw string) (forge.Target, error) {
+	return forge.Target{}, errors.New("not used")
+}
+func (a *countingAdapter) Authenticate(ctx context.Context, account string) (forge.Session, error) {
+	return nil, errors.New("not used")
+}
+func (a *countingAdapter) Collect(ctx context.Context, s forge.Session, t forge.Target, o forge.CollectOptions) (forge.CollectResult, error) {
+	a.collects++
+	return forge.CollectResult{}, errors.New("not used")
+}
+
+// TestReconcileKindMismatchFailsFast: a kind flip (the URL names a
+// different kind than the stored stream) is a caller error. The early
+// check in Reconcile fires before lease acquisition and collection, so a
+// deferred cycle never hides it behind a clean deferred envelope and the
+// adapter is never invoked. A supplied session skips admit, isolating the
+// early check from the admission path.
+func TestReconcileKindMismatchFailsFast(t *testing.T) {
+	const issueURL = "https://github.com/owner/name/issues/7"
+
+	// seedPRStream seeds a pull-request stream (kind = "") so that an
+	// issue URL for the same number is a kind flip.
+	seedPRStream := func(e *env) {
+		_, err := e.st.Publish(context.Background(), store.PublishInput{
+			Target:  forge.NewTarget("github", "github.com", "owner/name", 7, testURL),
+			Account: "alice",
+			Snapshot: &forge.Snapshot{
+				Head:           "headA",
+				CollectedStart: time.Now().Add(-time.Minute),
+				CollectedEnd:   time.Now(),
+			},
+		})
+		if err != nil {
+			t.Fatalf("seed PR stream: %v", err)
+		}
+	}
+
+	t.Run("mismatch fails fast", func(t *testing.T) {
+		e := newEnv(t)
+		seedPRStream(e)
+		adapter := &countingAdapter{}
+		e.eng.NewAdapter = func(svcs Services) forge.Adapter { return adapter }
+		sess := &fakeSession{login: "alice"}
+		_, err := e.eng.Reconcile(context.Background(), ReconcileInput{URL: issueURL, Session: sess})
+		var se *store.Error
+		if !errors.As(err, &se) || se.Code != store.CodeTargetKindMismatch {
+			t.Fatalf("reconcile: expected CodeTargetKindMismatch, got %v", err)
+		}
+		if adapter.collects != 0 {
+			t.Fatalf("adapter.Collect invoked %d times, want 0 (check must fire before collection)", adapter.collects)
+		}
+	})
+
+	t.Run("mismatch fails fast even when deferred", func(t *testing.T) {
+		e := newEnv(t)
+		seedPRStream(e)
+		// Put the stream in a deferred (not yet due) state: the pre-fix
+		// code would have returned a clean deferred result.
+		streamID, ok, err := e.st.StreamID(context.Background(), testTargetID, "alice")
+		if err != nil || !ok {
+			t.Fatalf("streamID: ok=%v err=%v", ok, err)
+		}
+		if err := e.st.SetNextDue(context.Background(), streamID, e.clk.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("set next_due: %v", err)
+		}
+		adapter := &countingAdapter{}
+		e.eng.NewAdapter = func(svcs Services) forge.Adapter { return adapter }
+		sess := &fakeSession{login: "alice"}
+		_, err = e.eng.Reconcile(context.Background(), ReconcileInput{URL: issueURL, Session: sess})
+		var se *store.Error
+		if !errors.As(err, &se) || se.Code != store.CodeTargetKindMismatch {
+			t.Fatalf("reconcile: expected CodeTargetKindMismatch, got %v", err)
+		}
+		if adapter.collects != 0 {
+			t.Fatalf("adapter.Collect invoked %d times, want 0 (check must fire before collection)", adapter.collects)
+		}
+	})
+}
+
 // TestWaitSignalCancellationReturnsErrorOutcome: a signal-like
 // cancellation (context.Canceled, as signal.NotifyContext produces on
 // SIGINT/SIGTERM) of a run whose cycles keep failing must end the wait

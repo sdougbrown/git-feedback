@@ -199,9 +199,12 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 	}
 
 	// A kind flip is a caller error (the URL names a different kind than
-	// the stored stream): fail fast before any lease acquisition or
+	// the stored stream). The check runs before lease acquisition and
 	// collection, so a deferred cycle never hides it behind a clean
-	// deferred envelope. A missing stream (ok=false) is not an error.
+	// deferred envelope. But admit runs first and can short-circuit
+	// Reconcile with a deferred/busy envelope (bootstrap-lease busy, auth
+	// backoff), deferring the detection to a later cycle. A missing stream
+	// (ok=false) is not an error.
 	if _, _, err := e.Store.CurrentSnapshot(ctx, target.ID, account, target); err != nil {
 		var se *store.Error
 		if errors.As(err, &se) && se.Code == store.CodeTargetKindMismatch {
