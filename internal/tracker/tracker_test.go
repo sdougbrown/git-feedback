@@ -740,6 +740,17 @@ func TestWaitFatalErrorFailsFast(t *testing.T) {
 	})
 }
 
+// TestFatalWaitErrorClassifiesKindMismatch pins the fatalWaitError
+// classification itself: the store's kind-flip error is fatal for wait
+// even when it never reaches a reconcile cycle (the backlog read path
+// above surfaces it first, so the subtest alone would stay green if the
+// classification were removed).
+func TestFatalWaitErrorClassifiesKindMismatch(t *testing.T) {
+	if !fatalWaitError(&store.Error{Code: store.CodeTargetKindMismatch}) {
+		t.Fatal("fatalWaitError(CodeTargetKindMismatch) = false, want true")
+	}
+}
+
 // TestWaitSignalCancellationReturnsErrorOutcome: a signal-like
 // cancellation (context.Canceled, as signal.NotifyContext produces on
 // SIGINT/SIGTERM) of a run whose cycles keep failing must end the wait

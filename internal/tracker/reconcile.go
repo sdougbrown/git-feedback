@@ -198,6 +198,17 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 		sess, account = s, verified
 	}
 
+	// A kind flip is a caller error (the URL names a different kind than
+	// the stored stream): fail fast before any lease acquisition or
+	// collection, so a deferred cycle never hides it behind a clean
+	// deferred envelope. A missing stream (ok=false) is not an error.
+	if _, _, err := e.Store.CurrentSnapshot(ctx, target.ID, account, target); err != nil {
+		var se *store.Error
+		if errors.As(err, &se) && se.Code == store.CodeTargetKindMismatch {
+			return Result{}, err
+		}
+	}
+
 	// Collection services bound to the verified account's scope.
 	svcs := e.services(host, account)
 	// Single source of truth: the lease acquisition and collection must
