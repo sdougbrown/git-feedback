@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -594,6 +595,94 @@ func TestPublishRollback(t *testing.T) {
 	}
 	if id := currentSnapshotID(t, reopened); id != 1 {
 		t.Errorf("current_snapshot_id = %d, want 1", id)
+	}
+}
+
+// issueTarget is a test target whose kind is issue, sharing the canonical
+// target ID of testTarget (pull request and issue share one number
+// sequence per repository).
+func issueTarget() forge.Target {
+	t := testTarget()
+	t.Kind = forge.TargetKindIssue
+	t.URL = "https://github.com/owner/name/issues/7"
+	return t
+}
+
+// TestKindFlipRejected verifies that publishing an inventory whose target
+// kind differs from the stored target's kind is rejected in both
+// directions: a PR stream refuses an issue inventory and an issue stream
+// refuses a PR inventory. The remedy is `store reset --target`.
+func TestKindFlipRejected(t *testing.T) {
+	ctx := context.Background()
+
+	// PR stream first, then an issue inventory with the same target ID.
+	st := openTestStore(t)
+	publish(t, st, "alice", mkSnapshot("headA", nil, nil, nil))
+	_, err := st.Publish(ctx, PublishInput{Target: issueTarget(), Account: "alice", Snapshot: mkSnapshot("", nil, nil, nil)})
+	if err == nil {
+		t.Fatal("publishing an issue inventory onto a PR stream succeeded, want rejection")
+	}
+	var se *Error
+	if !errors.As(err, &se) || se.Code != CodeTargetKindMismatch {
+		t.Fatalf("error = %v, want code %s", err, CodeTargetKindMismatch)
+	}
+	if !strings.Contains(err.Error(), "store reset --target") {
+		t.Errorf("error = %q, want it to point at `store reset --target`", err)
+	}
+
+	// Issue stream first, then a PR inventory with the same target ID.
+	st2 := openTestStore(t)
+	if _, err := st2.Publish(ctx, PublishInput{Target: issueTarget(), Account: "alice", Snapshot: mkSnapshot("", nil, nil, nil)}); err != nil {
+		t.Fatalf("publish issue stream: %v", err)
+	}
+	_, err = st2.Publish(ctx, PublishInput{Target: testTarget(), Account: "alice", Snapshot: mkSnapshot("headA", nil, nil, nil)})
+	if err == nil {
+		t.Fatal("publishing a PR inventory onto an issue stream succeeded, want rejection")
+	}
+	if !errors.As(err, &se) || se.Code != CodeTargetKindMismatch {
+		t.Fatalf("error = %v, want code %s", err, CodeTargetKindMismatch)
+	}
+	if !strings.Contains(err.Error(), "store reset --target") {
+		t.Errorf("error = %q, want it to point at `store reset --target`", err)
+	}
+}
+
+// TestCurrentSnapshotKindMismatch verifies the read-path guard: a
+// CurrentSnapshot whose requested target's kind differs from the stored
+// target's kind is rejected in both directions: a PR stream refuses an
+// issue read and an issue stream refuses a PR read.
+func TestCurrentSnapshotKindMismatch(t *testing.T) {
+	ctx := context.Background()
+
+	// PR stream first, then an issue read with the same target ID.
+	st := openTestStore(t)
+	publish(t, st, "alice", mkSnapshot("headA", nil, nil, nil))
+	_, ok, err := st.CurrentSnapshot(ctx, testTarget().ID, "alice", issueTarget())
+	if err == nil {
+		t.Fatal("CurrentSnapshot with a kind-flipped target succeeded, want CodeTargetKindMismatch")
+	}
+	var se *Error
+	if !errors.As(err, &se) || se.Code != CodeTargetKindMismatch {
+		t.Fatalf("error = %v, want code %s", err, CodeTargetKindMismatch)
+	}
+	if ok {
+		t.Error("ok = true, want false")
+	}
+
+	// Issue stream first, then a PR read with the same target ID.
+	st2 := openTestStore(t)
+	if _, err := st2.Publish(ctx, PublishInput{Target: issueTarget(), Account: "alice", Snapshot: mkSnapshot("", nil, nil, nil)}); err != nil {
+		t.Fatalf("publish issue stream: %v", err)
+	}
+	_, ok, err = st2.CurrentSnapshot(ctx, testTarget().ID, "alice", testTarget())
+	if err == nil {
+		t.Fatal("CurrentSnapshot with a kind-flipped target succeeded, want CodeTargetKindMismatch")
+	}
+	if !errors.As(err, &se) || se.Code != CodeTargetKindMismatch {
+		t.Fatalf("error = %v, want code %s", err, CodeTargetKindMismatch)
+	}
+	if ok {
+		t.Error("ok = true, want false")
 	}
 }
 

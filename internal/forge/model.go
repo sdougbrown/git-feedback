@@ -70,7 +70,11 @@ type Comment struct {
 
 // Snapshot is one complete collected inventory of a target's feedback.
 type Snapshot struct {
-	Head           string    `json:"head"`
+	Head string `json:"head"`
+	// HasHead reports whether the snapshot carries a head (a pull request
+	// snapshot always does; an issue snapshot never does). It is derived
+	// at collection and excluded from the stored body (json:"-").
+	HasHead        bool      `json:"-"`
 	CollectedStart time.Time `json:"collected_start"`
 	CollectedEnd   time.Time `json:"collected_end"`
 	Threads        []Thread  `json:"threads"`

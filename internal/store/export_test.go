@@ -85,6 +85,11 @@ func TestExportSnapshot(t *testing.T) {
 			t.Errorf("export file contains PascalCase key %q", key)
 		}
 	}
+	// PR exports stay byte-identical to before issue targets: the target
+	// object carries no kind field (forge.Target.Kind is omitempty).
+	if bytes.Contains(b, []byte(`"kind"`)) {
+		t.Errorf("PR export contains %q, want no kind field (byte-identical to pre-issue)", `"kind"`)
+	}
 	if doc.Schema != "git-feedback-snapshot/v2" {
 		t.Errorf("schema = %q", doc.Schema)
 	}
@@ -190,6 +195,55 @@ func TestExportRefusesStateDir(t *testing.T) {
 		t.Fatal("export into state directory succeeded")
 	} else if se, ok := err.(*Error); !ok || se.Code != CodeExportStateDir {
 		t.Fatalf("error = %v, want code %s", err, CodeExportStateDir)
+	}
+}
+
+// TestExportIssueTargetCarriesKind verifies that an issue-target export
+// carries `"kind":"issue"` on the target object, as docs/contract.md
+// promises for issue targets.
+func TestExportIssueTargetCarriesKind(t *testing.T) {
+	st := openTestStore(t)
+	if _, err := st.Publish(context.Background(), PublishInput{
+		Target: issueTarget(), Account: "alice",
+		Snapshot: mkSnapshot("", nil, nil, []forge.Comment{{ID: "c1", Author: "rev", Body: "note"}}),
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "snap.json")
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	res, err := st.Export(context.Background(), ExportInput{
+		TargetID: issueTarget().ID, Account: "alice", SnapshotID: "s1",
+		Destination: dest, StateDir: stateDir,
+	})
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	b, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read export: %v", err)
+	}
+	if !bytes.Contains(b, []byte(`"kind":"issue"`)) {
+		t.Errorf("issue export missing %q", `"kind":"issue"`)
+	}
+	var doc struct {
+		Target forge.Target `json:"target"`
+		Head   string       `json:"head"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !doc.Target.IsIssue() {
+		t.Errorf("target kind = %q, want issue", doc.Target.Kind)
+	}
+	if doc.Head != "" {
+		t.Errorf("exported head = %q, want empty for an issue target", doc.Head)
+	}
+	if res.Counts["comment"] != 1 {
+		t.Errorf("comment count = %d, want 1", res.Counts["comment"])
 	}
 }
 

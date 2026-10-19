@@ -14,6 +14,7 @@ import (
 
 	"github.com/sdougbrown/git-feedback/internal/clock"
 	"github.com/sdougbrown/git-feedback/internal/forge"
+	"github.com/sdougbrown/git-feedback/internal/github"
 	"github.com/sdougbrown/git-feedback/internal/store"
 )
 
@@ -218,6 +219,31 @@ func TestAmbiguousAccountError(t *testing.T) {
 	errObj := env["error"].(map[string]any)
 	if errObj["code"] != "ambiguous_account" {
 		t.Errorf("error.code = %v, want ambiguous_account", errObj["code"])
+	}
+}
+
+// TestLocalKindFlipEnvelope: a local command whose URL names a different
+// kind than the stored stream is a caller error: it fails with the
+// usage error (exit 2) naming the kind flip through localEnvelope,
+// before any inbox read.
+func TestLocalKindFlipEnvelope(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	publishHandler(t, st, "alice")
+
+	code, env, _ := runCLI(t, []string{"inbox", "--consumer", "ci", "--state-dir", dir, "https://github.com/owner/name/issues/7"})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error", env["status"])
+	}
+	errObj := env["error"].(map[string]any)
+	if errObj["code"] != "usage" {
+		t.Errorf("error.code = %v, want usage", errObj["code"])
+	}
+	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "store reset --target") {
+		t.Errorf("error.message = %q, want the kind-flip remedy", msg)
 	}
 }
 
@@ -491,6 +517,96 @@ func TestInboxExcludeSelf(t *testing.T) {
 		}
 		if !hasOwn {
 			t.Error("--exclude-self did not restore the account's own objects")
+		}
+	})
+}
+
+// TestIssueTargetLocalSurface: an issue URL resolves to a target whose
+// stream carries conversation comments only. The envelope reports a null
+// observed head, the default self filter still applies to the account's own
+// comments, and ack drains delivery as it does for a pull request.
+func TestIssueTargetLocalSurface(t *testing.T) {
+	dir, st, _ := handlerEnv(t)
+	const issueURL = "https://github.com/owner/name/issues/9"
+	target, err := github.ParseTarget(issueURL)
+	if err != nil {
+		t.Fatalf("ParseTarget: %v", err)
+	}
+	if !target.IsIssue() {
+		t.Fatalf("target kind = %q, want an issue target", target.Kind)
+	}
+	if _, err := st.Publish(context.Background(), store.PublishInput{
+		Target:  target,
+		Account: "alice",
+		Snapshot: &forge.Snapshot{
+			CollectedStart: handlerBaseTime.Add(-time.Minute),
+			CollectedEnd:   handlerBaseTime,
+			Comments: []forge.Comment{
+				{ID: "11", Author: "alice", Body: "proposal v2"},
+				{ID: "12", Author: "rev", Body: "accepted"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	base := []string{"inbox", "--consumer", "ci", "--state-dir", dir, issueURL}
+	code, env, _ := runCLI(t, base)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+	}
+	assertContract(t, env)
+	if env["observed_head"] != nil || env["expected_head"] != nil {
+		t.Errorf("observed_head/expected_head = %v/%v, want null/null", env["observed_head"], env["expected_head"])
+	}
+	if id := env["target"].(map[string]any)["id"]; id != target.ID {
+		t.Errorf("target.id = %v, want %s", id, target.ID)
+	}
+	counts := env["snapshot"].(map[string]any)["object_counts"].(map[string]any)
+	if counts["comment"].(float64) != 2 || counts["thread"].(float64) != 0 || counts["review"].(float64) != 0 {
+		t.Errorf("object_counts = %v, want 2 comments and nothing else", counts)
+	}
+
+	// 1 target initial observation plus rev's comment; alice's own comment is
+	// filtered by default.
+	events := env["events"].([]any)
+	if len(events) != 2 {
+		t.Fatalf("events = %d, want 2 (target + rev comment)", len(events))
+	}
+	if kind := events[0].(map[string]any)["object_kind"]; kind != "target" {
+		t.Errorf("first event object_kind = %v, want target", kind)
+	}
+	last := events[1].(map[string]any)
+	if last["object_kind"] != "comment" || last["author"] != "rev" || last["object_id"] != "12" {
+		t.Errorf("comment event = %v", last)
+	}
+
+	t.Run("--exclude-self delivers own comments", func(t *testing.T) {
+		code, env, _ := runCLI(t, []string{"inbox", "--consumer", "self", "--exclude-self", "--state-dir", dir, issueURL})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		if n := len(env["events"].([]any)); n != 3 {
+			t.Errorf("events = %d, want 3 (target + both comments)", n)
+		}
+	})
+
+	t.Run("ack drains the delivered events", func(t *testing.T) {
+		ids := make([]string, 0, len(events))
+		for _, e := range events {
+			ids = append(ids, e.(map[string]any)["id"].(string))
+		}
+		withStdin(t, strings.Join(ids, "\n"))
+		code, env, _ := runCLI(t, []string{"ack", "--consumer", "ci", "--events-from", "-", "--state-dir", dir, issueURL})
+		if code != 0 {
+			t.Fatalf("ack exit = %d, want 0 (%v)", code, env["error"])
+		}
+		code, env, _ = runCLI(t, base)
+		if code != 0 {
+			t.Fatalf("inbox exit = %d, want 0", code)
+		}
+		if n := len(env["events"].([]any)); n != 0 {
+			t.Errorf("pending events after ack = %d, want 0", n)
 		}
 	})
 }

@@ -1,10 +1,10 @@
 # git-feedback
 
-`git-feedback` observes GitHub review feedback on a pull request, commits
-complete inventories and changes, and delivers replayable events to independent
-consumers. It works without a clone, repository administration, a GitHub App,
-or a harness-specific runtime. Install it on `PATH` to expose both
-`git-feedback` and `git feedback`.
+`git-feedback` observes GitHub review feedback on a pull request — or the
+conversation comments on an issue — commits complete inventories and changes,
+and delivers replayable events to independent consumers. It works without a
+clone, repository administration, a GitHub App, or a harness-specific runtime.
+Install it on `PATH` to expose both `git-feedback` and `git feedback`.
 
 An empty delivery inbox does not mean findings are triaged, threads are
 resolved, fixes are correct, or a reviewer has finished.
@@ -69,6 +69,9 @@ Every subcommand writes exactly one JSON envelope to stdout (see
 always JSON. Operational errors exit 1 and usage errors exit 2; both still print
 the envelope.
 
+`<URL>` is a GitHub.com pull request URL (`/pull/N`) or issue URL
+(`/issues/N`); see "Issue targets" below.
+
 ## Commands
 
 - `reconcile` — attempt one complete collection and return a compact summary,
@@ -98,6 +101,42 @@ the envelope.
   snapshots, events, attempts, and acknowledgements are deleted, while other
   targets and host-scoped state survive. Reset is the documented remedy when
   the tool refuses a store (see "The store is a disposable cache" below).
+
+## Issue targets
+
+An issue URL is a target, not just a pull request URL. Pull requests and issues
+share one number sequence per repository, so a target ID
+(`<forge>:<host>:<repo>:<number>`) stays unique across both, and every
+subcommand — `reconcile`, `snapshot`, `inbox`, `ack`, `show`, `wait`, `store
+reset --target` — works the same way.
+
+- **Only conversation comments are collected.** An issue has no head, review
+  threads, or reviews, so collection reads `/repos/{repo}/issues/{n}/comments`
+  and skips the pulls, reviews, and review-threads calls. Comment events (and
+  the target's own `initial_observation`) are the whole stream; there are no
+  `thread`, `review`, or `head_changed` events. Issue state changes
+  (closed/reopened) are not collected in this version.
+- **Heads are null.** `observed_head` and `expected_head` are `null`,
+  `reviewer_completion` stays `unknown`, and `status` never becomes
+  `head_changed`.
+- **Pull-request-only flags are accepted no-ops.** `--head`,
+  `--skip-head-changed`, and `--skip-empty-reviews` have nothing to act on for
+  an issue target — there is no head to pin and no review or head-change event
+  to filter — so they are ignored rather than rejected. One command shape then
+  works across a set of targets that mixes pull requests and issues, and the
+  envelope shows the pin did not apply: `expected_head` stays `null`.
+- **`--exclude-self` matters most.** Each agent posts as its human's account,
+  so the default self filter is what stops it waking on its own comments.
+- **`/issues/N` on a pull request number stays an issue target.** The URL
+  decides the kind; such a target collects comments only. Use the
+  `/pull/N` URL for full pull request collection (the number, and therefore
+  the target ID, is the same either way). Switching the spelling on an
+  existing stream is rejected; `store reset --target` re-baselines it.
+
+A tracking issue is a natural home for a cross-repo contract: each side posts
+with `gh issue comment`, then arms `git-feedback wait` on the issue URL to be
+woken by the other side's reply. `git-feedback` stays read-only — posting is the
+agent's job.
 
 ## The store is a disposable cache
 

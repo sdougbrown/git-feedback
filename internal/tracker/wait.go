@@ -98,6 +98,7 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 	if err != nil {
 		return WaitResult{}, err
 	}
+	in.Head = normalizeHeadPin(target, in.Head)
 	clk := e.clock()
 
 	eng, closeStore, err := e.openStoreResilient(ctx, clk)
@@ -308,7 +309,7 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 	if len(page.Events) == 0 {
 		return WaitResult{}, false, nil
 	}
-	sum, ok, err := eng.Store.CurrentSnapshot(ctx, target.ID, account)
+	sum, ok, err := eng.Store.CurrentSnapshot(ctx, target.ID, account, target)
 	if err != nil {
 		if isStoreOpenError(err) {
 			return WaitResult{}, false, errTransientStore
@@ -326,7 +327,7 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 			Account:         account,
 			HasAccount:      true,
 			ObservedHead:    sum.Head,
-			HasObservedHead: sum.Head != "",
+			HasObservedHead: sum.HasHead,
 			ExpectedHead:    in.Head,
 			HasExpectedHead: true,
 			Snapshot:        &sum,
@@ -344,7 +345,9 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 	}
 	if ok {
 		res.Snapshot = &sum
-		res.ObservedHead, res.HasObservedHead = sum.Head, true
+		// An issue target has no head: the envelope reports null rather
+		// than an empty string.
+		res.ObservedHead, res.HasObservedHead = sum.Head, sum.HasHead
 	}
 	if in.Head != "" {
 		res.ExpectedHead, res.HasExpectedHead = in.Head, true
@@ -399,8 +402,8 @@ func (e *Engine) timeoutResult(eng *Engine, target forge.Target, account string,
 	res := WaitResult{Status: StatusTimeout, Target: target}
 	if account != "" {
 		res.Account, res.HasAccount = account, true
-		res.Snapshot = eng.currentSnapshot(context.Background(), target.ID, account)
-		res.Freshness = eng.freshness(context.Background(), target.ID, account)
+		res.Snapshot = eng.currentSnapshot(context.Background(), target, account)
+		res.Freshness = eng.freshness(context.Background(), target, account)
 	}
 	if in.Head != "" {
 		res.ExpectedHead, res.HasExpectedHead = in.Head, true
@@ -498,6 +501,13 @@ func isStoreOpenError(err error) bool {
 // fatalWaitError reports whether one reconciliation failure must end the
 // wait immediately instead of being retried until the deadline.
 func fatalWaitError(err error) bool {
+	// A kind flip is a caller error (the URL names a different kind than
+	// the stored stream), not a transient failure: surface it immediately
+	// instead of retrying until the deadline.
+	var se *store.Error
+	if errors.As(err, &se) && se.Code == store.CodeTargetKindMismatch {
+		return true
+	}
 	return errors.Is(err, forge.ErrAuth) ||
 		errors.Is(err, forge.ErrNotFound) ||
 		errors.Is(err, forge.ErrAccountMismatch) ||

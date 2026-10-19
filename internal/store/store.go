@@ -35,6 +35,7 @@ const (
 	CodeExportStateDir     = "export_state_dir"
 	CodeExportUnsupported  = "export_unsupported"
 	CodeInvalidDestination = "invalid_destination"
+	CodeTargetKindMismatch = "target_kind_mismatch"
 )
 
 // Error is a typed store error carrying a stable code.
@@ -134,6 +135,31 @@ func (s *Store) TargetInfo(ctx context.Context, targetID string) (forge.Target, 
 		return forge.Target{}, false, &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("decode target: %v", err)}
 	}
 	return t, true, nil
+}
+
+// StoredTarget returns the stored target for (targetID, account), or
+// false when no stream exists. It is the light kind-flip probe: it reads
+// and decodes the stored target_json only, without the snapshot JOIN,
+// observation MAX, or object counts CurrentSnapshot carries. When the
+// stored target's kind differs from the requested target's kind, it
+// returns CodeTargetKindMismatch; an undecodable target_json is
+// CodeStoreCorrupt.
+func (s *Store) StoredTarget(ctx context.Context, targetID, account string, requested forge.Target) (forge.Target, bool, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT target_json FROM targets WHERE target_id = ? AND account = ?`,
+		targetID, forge.CanonicalAccount(account)).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return forge.Target{}, false, nil
+	}
+	if err != nil {
+		return forge.Target{}, false, &Error{Code: CodeStore, Message: fmt.Sprintf("read stored target: %v", err)}
+	}
+	stored, err := decodeStoredTarget(raw, requested)
+	if err != nil {
+		return forge.Target{}, false, err
+	}
+	return stored, true, nil
 }
 
 // AccountsForTarget returns the canonical accounts that have a stream for

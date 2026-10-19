@@ -161,6 +161,17 @@ func (e *Engine) services(host, account string) Services {
 	}
 }
 
+// normalizeHeadPin drops a pinned head on an issue target. A pinned
+// head is a pull-request option: an issue target has no head to
+// compare against, so the pin is ignored rather than rejected (see
+// docs/contract.md, "Issue targets").
+func normalizeHeadPin(target forge.Target, head string) string {
+	if target.IsIssue() {
+		return ""
+	}
+	return head
+}
+
 // Reconcile runs one one-shot reconciliation cycle for the URL.
 func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, error) {
 	// Unsupported hosts are rejected before credential lookup and before
@@ -169,6 +180,7 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
+	in.Head = normalizeHeadPin(target, in.Head)
 	host := forge.CanonicalHost(target.Host)
 	ttl, refresh, min := e.durations()
 	token, err := newLeaseToken()
@@ -190,6 +202,20 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 			return Result{}, aerr
 		}
 		sess, account = s, verified
+	}
+
+	// A kind flip is a caller error (the URL names a different kind than
+	// the stored stream). The check runs before lease acquisition and
+	// collection, so a deferred cycle never hides it behind a clean
+	// deferred envelope. But admit runs first and can short-circuit
+	// Reconcile with a deferred/busy envelope (bootstrap-lease busy, auth
+	// backoff), deferring the detection to a later cycle. A missing stream
+	// (ok=false) is not an error.
+	if _, _, err := e.Store.StoredTarget(ctx, target.ID, account, target); err != nil {
+		var se *store.Error
+		if errors.As(err, &se) && se.Code == store.CodeTargetKindMismatch {
+			return Result{}, err
+		}
 	}
 
 	// Collection services bound to the verified account's scope.
@@ -283,8 +309,8 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 				HasObservedHead: observed != "",
 				ExpectedHead:    expected,
 				HasExpectedHead: expected != "",
-				Snapshot:        e.currentSnapshot(ctx, target.ID, account),
-				Freshness:       e.freshness(ctx, target.ID, account),
+				Snapshot:        e.currentSnapshot(ctx, target, account),
+				Freshness:       e.freshness(ctx, target, account),
 				Attempt:         att,
 				Session:         sess,
 				BlockedUntil:    e.nextDueOr(),
@@ -382,10 +408,10 @@ func (e *Engine) publish(ctx context.Context, target forge.Target, host, account
 		Account:         account,
 		HasAccount:      true,
 		ObservedHead:    coll.Snapshot.Head,
-		HasObservedHead: true,
-		Snapshot:        e.currentSnapshot(ctx, target.ID, account),
+		HasObservedHead: coll.Snapshot.HasHead,
+		Snapshot:        e.currentSnapshot(ctx, target, account),
 		Attempt:         e.latestAttempt(ctx, target.ID, account),
-		Freshness:       e.freshness(ctx, target.ID, account),
+		Freshness:       e.freshness(ctx, target, account),
 		Session:         sess,
 	}, nil
 }
@@ -399,8 +425,8 @@ func (e *Engine) streamID(ctx context.Context, targetID, account string) (int64,
 }
 
 // currentSnapshot returns the stream's current snapshot summary, or nil.
-func (e *Engine) currentSnapshot(ctx context.Context, targetID, account string) *store.SnapshotSummary {
-	sum, ok, err := e.Store.CurrentSnapshot(ctx, targetID, account)
+func (e *Engine) currentSnapshot(ctx context.Context, target forge.Target, account string) *store.SnapshotSummary {
+	sum, ok, err := e.Store.CurrentSnapshot(ctx, target.ID, account, target)
 	if err != nil || !ok {
 		return nil
 	}
@@ -417,8 +443,8 @@ func (e *Engine) latestAttempt(ctx context.Context, targetID, account string) *s
 }
 
 // freshness computes the freshness inputs for the stream's current snapshot.
-func (e *Engine) freshness(ctx context.Context, targetID, account string) Freshness {
-	sum, ok, err := e.Store.CurrentSnapshot(ctx, targetID, account)
+func (e *Engine) freshness(ctx context.Context, target forge.Target, account string) Freshness {
+	sum, ok, err := e.Store.CurrentSnapshot(ctx, target.ID, account, target)
 	if err != nil || !ok {
 		return Freshness{}
 	}
@@ -439,9 +465,9 @@ func (e *Engine) deferredResult(ctx context.Context, target forge.Target, accoun
 	}
 	if account != "" {
 		res.Account, res.HasAccount = account, true
-		res.Snapshot = e.currentSnapshot(ctx, target.ID, account)
+		res.Snapshot = e.currentSnapshot(ctx, target, account)
 		res.Attempt = e.latestAttempt(ctx, target.ID, account)
-		res.Freshness = e.freshness(ctx, target.ID, account)
+		res.Freshness = e.freshness(ctx, target, account)
 	}
 	return res
 }

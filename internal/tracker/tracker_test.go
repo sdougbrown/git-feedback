@@ -249,7 +249,7 @@ func (a *completeAdapter) Authenticate(ctx context.Context, account string) (for
 }
 func (a *completeAdapter) Collect(ctx context.Context, s forge.Session, t forge.Target, o forge.CollectOptions) (forge.CollectResult, error) {
 	return forge.CollectResult{
-		Snapshot:   &forge.Snapshot{Head: "h1"},
+		Snapshot:   &forge.Snapshot{Head: "h1", HasHead: true},
 		HeadBefore: "h1",
 		HeadAfter:  "h1",
 		Complete:   true,
@@ -709,6 +709,192 @@ func TestWaitFatalErrorFailsFast(t *testing.T) {
 			t.Fatalf("wait: took %v, expected to run until the 2s deadline", elapsed)
 		}
 	})
+
+	t.Run("CodeTargetKindMismatch fails fast", func(t *testing.T) {
+		e := newEnvAt(t, time.Now().Add(-time.Hour))
+		// Seed a PR stream.
+		_, err := e.st.Publish(context.Background(), store.PublishInput{
+			Target:  forge.NewTarget("github", "github.com", "owner/name", 7, testURL),
+			Account: "alice",
+			Snapshot: &forge.Snapshot{
+				Head:           "headA",
+				CollectedStart: time.Now().Add(-time.Minute),
+				CollectedEnd:   time.Now(),
+			},
+		})
+		if err != nil {
+			t.Fatalf("seed PR stream: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		start := time.Now()
+		_, err = e.eng.Wait(ctx, WaitInput{URL: "https://github.com/owner/name/issues/7", Consumer: "c"})
+		elapsed := time.Since(start)
+		var se *store.Error
+		if !errors.As(err, &se) || se.Code != store.CodeTargetKindMismatch {
+			t.Fatalf("wait: expected CodeTargetKindMismatch, got %v", err)
+		}
+		if elapsed >= time.Second {
+			t.Fatalf("wait: took %v, expected immediate failure before the 2s deadline", elapsed)
+		}
+	})
+}
+
+// TestFatalWaitErrorClassifiesKindMismatch pins the fatalWaitError
+// classification itself: the store's kind-flip error is fatal for wait
+// even when it never reaches a reconcile cycle (the backlog read path
+// above surfaces it first, so the subtest alone would stay green if the
+// classification were removed).
+func TestFatalWaitErrorClassifiesKindMismatch(t *testing.T) {
+	if !fatalWaitError(&store.Error{Code: store.CodeTargetKindMismatch}) {
+		t.Fatal("fatalWaitError(CodeTargetKindMismatch) = false, want true")
+	}
+}
+
+// countingAdapter is a forge.Adapter that counts Collect invocations, so a
+// test can assert the early kind-flip check fires before any collection.
+// It is the lightest recording seam: it wraps nothing and only tallies.
+type countingAdapter struct {
+	collects int
+}
+
+func (a *countingAdapter) Host() string { return testHost }
+func (a *countingAdapter) ParseTarget(raw string) (forge.Target, error) {
+	return forge.Target{}, errors.New("not used")
+}
+func (a *countingAdapter) Authenticate(ctx context.Context, account string) (forge.Session, error) {
+	return nil, errors.New("not used")
+}
+func (a *countingAdapter) Collect(ctx context.Context, s forge.Session, t forge.Target, o forge.CollectOptions) (forge.CollectResult, error) {
+	a.collects++
+	return forge.CollectResult{}, errors.New("not used")
+}
+
+// TestReconcileKindMismatchFailsFast: a kind flip (the URL names a
+// different kind than the stored stream) is a caller error. The early
+// check in Reconcile fires before lease acquisition and collection, so a
+// deferred cycle never hides it behind a clean deferred envelope and the
+// adapter is never invoked. A supplied session skips admit, isolating the
+// early check from the admission path.
+func TestReconcileKindMismatchFailsFast(t *testing.T) {
+	const issueURL = "https://github.com/owner/name/issues/7"
+
+	// seedPRStream seeds a pull-request stream (kind = "") so that an
+	// issue URL for the same number is a kind flip.
+	seedPRStream := func(e *env) {
+		_, err := e.st.Publish(context.Background(), store.PublishInput{
+			Target:  forge.NewTarget("github", "github.com", "owner/name", 7, testURL),
+			Account: "alice",
+			Snapshot: &forge.Snapshot{
+				Head:           "headA",
+				CollectedStart: time.Now().Add(-time.Minute),
+				CollectedEnd:   time.Now(),
+			},
+		})
+		if err != nil {
+			t.Fatalf("seed PR stream: %v", err)
+		}
+	}
+
+	t.Run("mismatch fails fast", func(t *testing.T) {
+		e := newEnv(t)
+		seedPRStream(e)
+		adapter := &countingAdapter{}
+		e.eng.NewAdapter = func(svcs Services) forge.Adapter { return adapter }
+		sess := &fakeSession{login: "alice"}
+		_, err := e.eng.Reconcile(context.Background(), ReconcileInput{URL: issueURL, Session: sess})
+		var se *store.Error
+		if !errors.As(err, &se) || se.Code != store.CodeTargetKindMismatch {
+			t.Fatalf("reconcile: expected CodeTargetKindMismatch, got %v", err)
+		}
+		if adapter.collects != 0 {
+			t.Fatalf("adapter.Collect invoked %d times, want 0 (check must fire before collection)", adapter.collects)
+		}
+	})
+
+	t.Run("mismatch fails fast even when deferred", func(t *testing.T) {
+		e := newEnv(t)
+		seedPRStream(e)
+		// Put the stream in a deferred (not yet due) state: the pre-fix
+		// code would have returned a clean deferred result.
+		streamID, ok, err := e.st.StreamID(context.Background(), testTargetID, "alice")
+		if err != nil || !ok {
+			t.Fatalf("streamID: ok=%v err=%v", ok, err)
+		}
+		if err := e.st.SetNextDue(context.Background(), streamID, e.clk.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("set next_due: %v", err)
+		}
+		adapter := &countingAdapter{}
+		e.eng.NewAdapter = func(svcs Services) forge.Adapter { return adapter }
+		sess := &fakeSession{login: "alice"}
+		_, err = e.eng.Reconcile(context.Background(), ReconcileInput{URL: issueURL, Session: sess})
+		var se *store.Error
+		if !errors.As(err, &se) || se.Code != store.CodeTargetKindMismatch {
+			t.Fatalf("reconcile: expected CodeTargetKindMismatch, got %v", err)
+		}
+		if adapter.collects != 0 {
+			t.Fatalf("adapter.Collect invoked %d times, want 0 (check must fire before collection)", adapter.collects)
+		}
+	})
+
+	t.Run("kind flip fails fast even with a pinned head", func(t *testing.T) {
+		e := newEnv(t)
+		seedPRStream(e)
+		adapter := &countingAdapter{}
+		e.eng.NewAdapter = func(svcs Services) forge.Adapter { return adapter }
+		sess := &fakeSession{login: "alice"}
+		// The kind-flip guard with a pinned head supplied (in.Head set) —
+		// a distinct input path over the "mismatch fails fast" subtest.
+		// The guard fires before collection, so the pin never reaches the
+		// adapter.
+		_, err := e.eng.Reconcile(context.Background(), ReconcileInput{URL: issueURL, Head: "cafecafe", Session: sess})
+		var se *store.Error
+		if !errors.As(err, &se) || se.Code != store.CodeTargetKindMismatch {
+			t.Fatalf("reconcile: expected CodeTargetKindMismatch, got %v", err)
+		}
+		if adapter.collects != 0 {
+			t.Fatalf("adapter.Collect invoked %d times, want 0 (the pin never reaches collection)", adapter.collects)
+		}
+	})
+}
+
+// TestReconcileAdmitBusyDefersKindFlip: a kind-flipped URL whose
+// bootstrap admission is busy short-circuits Reconcile with the clean
+// busy envelope before the early kind-flip check runs, deferring the
+// detection to a later cycle (the documented admit short-circuit). No
+// session is supplied, so admit runs.
+func TestReconcileAdmitBusyDefersKindFlip(t *testing.T) {
+	const issueURL = "https://github.com/owner/name/issues/7"
+	e := newEnv(t)
+	// Seed a PR stream so the issue URL is a kind flip.
+	_, err := e.st.Publish(context.Background(), store.PublishInput{
+		Target:  forge.NewTarget("github", "github.com", "owner/name", 7, testURL),
+		Account: "alice",
+		Snapshot: &forge.Snapshot{
+			Head:           "headA",
+			CollectedStart: time.Now().Add(-time.Minute),
+			CollectedEnd:   time.Now(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed PR stream: %v", err)
+	}
+	// Hold the bootstrap lease with a foreign token so admit is busy.
+	if err := e.st.AcquireBootstrapLease(context.Background(), testHost, "foreign", time.Minute, e.clk.Now()); err != nil {
+		t.Fatalf("hold bootstrap lease: %v", err)
+	}
+	adapter := &countingAdapter{}
+	e.eng.NewAdapter = func(svcs Services) forge.Adapter { return adapter }
+	res, err := e.eng.Reconcile(context.Background(), ReconcileInput{URL: issueURL})
+	if err != nil {
+		t.Fatalf("reconcile: %v, want the clean busy envelope (no error)", err)
+	}
+	if res.Status != StatusBusy {
+		t.Fatalf("status = %s, want busy (admit short-circuits before the kind-flip check)", res.Status)
+	}
+	if adapter.collects != 0 {
+		t.Fatalf("adapter.Collect invoked %d times, want 0", adapter.collects)
+	}
 }
 
 // TestWaitSignalCancellationReturnsErrorOutcome: a signal-like
@@ -918,11 +1104,11 @@ func TestFreshnessStaleUsesMinInterval(t *testing.T) {
 		t.Fatalf("status = %s, want updated", res.Status)
 	}
 	e.clk.Advance(30 * time.Second)
-	if f := e.eng.freshness(context.Background(), testTargetID, "alice"); f.Stale {
+	if f := e.eng.freshness(context.Background(), forge.NewTarget("github", "github.com", "owner/name", 7, testURL), "alice"); f.Stale {
 		t.Fatalf("stale at +30s, want fresh: %+v", f)
 	}
 	e.clk.Advance(31 * time.Second)
-	if f := e.eng.freshness(context.Background(), testTargetID, "alice"); !f.Stale {
+	if f := e.eng.freshness(context.Background(), forge.NewTarget("github", "github.com", "owner/name", 7, testURL), "alice"); !f.Stale {
 		t.Fatalf("not stale at +61s, want stale: %+v", f)
 	}
 }

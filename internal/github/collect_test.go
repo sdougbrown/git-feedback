@@ -30,15 +30,17 @@ type restPageSpec struct {
 type stubServer struct {
 	graphql       map[string][]string // "threads" | "nested" | "other"
 	rest          map[string][]restPageSpec
-	heads         []string // head SHAs served in sequence; the last repeats
-	restServed    int      // counts unconditional REST page bodies served
-	nestedServed  int      // counts nested comment page bodies served
-	threadsServed int      // counts outer thread page bodies served
+	heads         []string       // head SHAs served in sequence; the last repeats
+	restServed    int            // counts unconditional REST page bodies served
+	nestedServed  int            // counts nested comment page bodies served
+	threadsServed int            // counts outer thread page bodies served
+	hits          map[string]int // counts requests per endpoint key
 }
 
 func (s *stubServer) handler() http.HandlerFunc {
 	gcount := map[string]int{}
 	rcount := map[string]int{}
+	s.hits = map[string]int{}
 	hi := 0
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -52,6 +54,7 @@ func (s *stubServer) handler() http.HandlerFunc {
 			case strings.Contains(q, "reviewThreads"):
 				key = "threads"
 			}
+			s.hits[key]++
 			pages := s.graphql[key]
 			if len(pages) == 0 {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -77,6 +80,7 @@ func (s *stubServer) handler() http.HandlerFunc {
 			w.Write([]byte(pages[gi]))
 		case strings.Contains(r.URL.Path, "/reviews") || strings.Contains(r.URL.Path, "/comments"):
 			key := restKey(r)
+			s.hits[key]++
 			pages := s.rest[key]
 			ri := rcount[key]
 			if ri >= len(pages) {
@@ -103,6 +107,7 @@ func (s *stubServer) handler() http.HandlerFunc {
 			w.WriteHeader(status)
 			w.Write([]byte(p.body))
 		default: // head read: /repos/{repo}/pulls/{n}
+			s.hits["head"]++
 			sha := s.heads[len(s.heads)-1]
 			if hi < len(s.heads) {
 				sha = s.heads[hi]
@@ -120,6 +125,9 @@ func restKey(r *http.Request) string {
 	}
 	return "comments"
 }
+
+// hit returns the number of requests served for one endpoint key.
+func (s *stubServer) hit(key string) int { return s.hits[key] }
 
 func fixture(t *testing.T, name string) string {
 	t.Helper()
@@ -193,17 +201,127 @@ func TestCollectAllPages(t *testing.T) {
 	if inv.Head != "1111111111111111111111111111111111111111" {
 		t.Fatalf("unexpected head %q", inv.Head)
 	}
+	if !inv.Snapshot.HasHead {
+		t.Fatal("snapshot HasHead = false, want true for a pull request target")
+	}
 	// Synthetic target object plus one object per feedback item.
 	if len(inv.Objects) != 152 {
 		t.Fatalf("want 152 objects, got %d", len(inv.Objects))
 	}
-	if inv.Objects[0].Kind != "target" || inv.Objects[0].ProviderID != inv.Target.ID || inv.Objects[0].Head != inv.Head {
-		t.Fatalf("target object wrong: %+v", inv.Objects[0])
+	var targetObj *Object
+	for i := range inv.Objects {
+		if inv.Objects[i].Kind == forge.KindTarget {
+			targetObj = &inv.Objects[i]
+			break
+		}
 	}
-	for _, o := range inv.Objects[1:] {
+	if targetObj == nil || targetObj.ProviderID != inv.Target.ID || targetObj.Head != inv.Head {
+		t.Fatalf("target object wrong: %+v", targetObj)
+	}
+	for _, o := range inv.Objects {
+		if o.Kind == forge.KindTarget {
+			continue // the synthetic target has no fingerprint
+		}
 		if o.Fingerprint == "" {
 			t.Fatalf("object %s missing fingerprint", o.ProviderID)
 		}
+	}
+}
+
+// TestCollectIssueTargetOnlyComments: an issue target collects its
+// conversation comments and nothing else — no head read, no review-thread
+// query, no reviews call — and the snapshot head stays empty.
+func TestCollectIssueTargetOnlyComments(t *testing.T) {
+	stub := baseStub(t)
+	stub.rest["comments"] = []restPageSpec{{body: `[
+		{"id":11,"user":{"login":"bob"},"body":"contract: v2","created_at":"2024-01-01T00:00:00Z","html_url":"https://github.com/o/r/issues/9#issuecomment-11"},
+		{"id":12,"user":{"login":"alice"},"body":"confirmed","created_at":"2024-01-02T00:00:00Z"}
+	]`}}
+	adapter, sess := newCollectEnv(t, stub)
+	target, err := ParseTarget("https://github.com/o/r/issues/9")
+	if err != nil {
+		t.Fatalf("ParseTarget: %v", err)
+	}
+
+	// A pinned head is a pull-request option: on an issue target it is
+	// ignored rather than an error.
+	inv, err := adapter.collect(context.Background(), sess.tp, target, forge.CollectOptions{ExpectedHead: "deadbeef"})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	if inv.Head != "" || inv.Snapshot.Head != "" {
+		t.Fatalf("issue target head = %q/%q, want empty", inv.Head, inv.Snapshot.Head)
+	}
+	if inv.Snapshot.HasHead {
+		t.Fatal("snapshot HasHead = true, want false for an issue target")
+	}
+	if len(inv.Snapshot.Threads) != 0 || len(inv.Snapshot.Reviews) != 0 {
+		t.Fatalf("threads/reviews = %d/%d, want 0/0", len(inv.Snapshot.Threads), len(inv.Snapshot.Reviews))
+	}
+	if len(inv.Snapshot.Comments) != 2 {
+		t.Fatalf("comments = %d, want 2", len(inv.Snapshot.Comments))
+	}
+	if got := inv.Snapshot.Comments[0]; got.ID != "11" || got.Author != "bob" || got.URL == "" {
+		t.Fatalf("first comment = %+v", got)
+	}
+	if got := inv.Snapshot.Comments[1].Author; got != "alice" {
+		t.Fatalf("second comment author = %q, want alice", got)
+	}
+	if len(inv.Objects) != 3 {
+		t.Fatalf("objects = %d, want 3 (target + two comments)", len(inv.Objects))
+	}
+	if inv.Objects[0].Kind != forge.KindTarget || inv.Objects[0].ProviderID != target.ID || inv.Objects[0].Head != "" {
+		t.Fatalf("target object wrong: %+v", inv.Objects[0])
+	}
+	for _, o := range inv.Objects[1:] {
+		if o.Kind != forge.KindComment || o.Fingerprint == "" || o.Comment == nil {
+			t.Fatalf("comment object wrong: %+v", o)
+		}
+	}
+
+	for _, key := range []string{"head", "threads", "nested", "reviews"} {
+		if n := stub.hit(key); n != 0 {
+			t.Errorf("endpoint %q served %d requests, want 0 for an issue target", key, n)
+		}
+	}
+	if n := stub.hit("comments"); n == 0 {
+		t.Error("the conversation comments endpoint was never read")
+	}
+
+	// The public Collect path reports a complete result with no heads.
+	res, err := adapter.Collect(context.Background(), sess, target, forge.CollectOptions{})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if !res.Complete || res.Snapshot == nil {
+		t.Fatalf("Collect incomplete: %+v", res)
+	}
+	if res.HeadBefore != "" || res.HeadAfter != "" {
+		t.Fatalf("Collect heads = %q/%q, want empty", res.HeadBefore, res.HeadAfter)
+	}
+}
+
+// TestCollectIssueTargetCommentsFailure: a non-200 conversation comments
+// page fails the attempt and the result is not Complete, mirroring the
+// GQL-abort tests.
+func TestCollectIssueTargetCommentsFailure(t *testing.T) {
+	stub := baseStub(t)
+	stub.rest["comments"] = []restPageSpec{{status: http.StatusBadGateway}}
+	adapter, sess := newCollectEnv(t, stub)
+	target, err := ParseTarget("https://github.com/o/r/issues/9")
+	if err != nil {
+		t.Fatalf("ParseTarget: %v", err)
+	}
+
+	res, err := adapter.Collect(context.Background(), sess, target, forge.CollectOptions{})
+	if err == nil {
+		t.Fatal("a non-200 comments page must fail the attempt")
+	}
+	if !errors.Is(err, forge.ErrIncomplete) {
+		t.Fatalf("want ErrIncomplete, got %v", err)
+	}
+	if res.Complete || res.Snapshot != nil {
+		t.Fatalf("a failed attempt must not be complete: %+v", res)
 	}
 }
 
@@ -749,7 +867,10 @@ func TestNullAuthorTolerated(t *testing.T) {
 	if len(inv1.Objects) != len(inv2.Objects) {
 		t.Fatalf("object count changed between collects: %d → %d", len(inv1.Objects), len(inv2.Objects))
 	}
-	for i := 1; i < len(inv1.Objects); i++ { // skip synthetic target (no fingerprint)
+	for i := range inv1.Objects { // skip the synthetic target (no fingerprint)
+		if inv1.Objects[i].Kind == forge.KindTarget {
+			continue
+		}
 		if inv1.Objects[i].Fingerprint != inv2.Objects[i].Fingerprint {
 			t.Fatalf("fingerprint not stable for %s: %s != %s", inv1.Objects[i].ProviderID, inv1.Objects[i].Fingerprint, inv2.Objects[i].Fingerprint)
 		}

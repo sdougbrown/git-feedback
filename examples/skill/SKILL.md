@@ -1,15 +1,16 @@
 ---
 name: git-feedback
 description: "Operate the git-feedback CLI to collect PR review feedback, read only what changed since the last pass, watch a PR for new feedback, and acknowledge delivered events. Use when a task needs PR review threads, reviews, or top-level comments; when watching a PR for reviewer activity; or when the user says 'check for new feedback', 'watch this PR', 'what changed on the PR', or mentions git-feedback. git-feedback is read-only toward GitHub: it does not post replies or resolve threads."
-argument-hint: '[PR URL]'
+argument-hint: '[PR or issue URL]'
 compatibility: "Requires git-feedback 0.5.0 or later on PATH and an authenticated gh. Falls back to the forge API (gh pr view / gh api) when unavailable."
 ---
 
-$ARGUMENTS: a PR URL.
+$ARGUMENTS: a PR or issue URL.
 
 `git-feedback` collects a PR's review threads, reviews, and top-level comments
-into immutable snapshots and delivers per-object change events to named
-consumers. It is read-only toward GitHub. Machine contract:
+— or an issue's conversation comments — into immutable snapshots and delivers
+per-object change events to named consumers. It is read-only toward GitHub.
+Machine contract:
 `docs/contract.md` in the git-feedback repository; read it only when an
 envelope field below is not enough.
 
@@ -45,6 +46,12 @@ and `--help` on any other subcommand returns a usage error.
   the reviewer.
 - Pass `--skip-empty-reviews` to `inbox` and `wait`. GitHub creates an empty
   `COMMENTED` review for every inline reply; they carry no content.
+- **Issue targets work the same way.** An `/issues/N` URL collects that issue's
+  conversation comments instead of review threads: `observed_head` is `null`,
+  and `--head`, `--skip-head-changed`, and `--skip-empty-reviews` are inert
+  (accepted and ignored). Use one to watch a tracking issue where the other
+  side answers with `gh issue comment` — the default self filter keeps your own
+  comments from waking you.
 
 ## Consumer names
 

@@ -153,7 +153,7 @@ func (s *ghStub) serve(w http.ResponseWriter, r *http.Request) {
 		s.serveREST(w, r, s.reviews)
 	case strings.HasSuffix(r.URL.Path, "/comments"):
 		s.bump("comments")
-		s.serveREST(w, r, s.comments)
+		s.serveREST(w, r, s.commentsBody())
 	default: // head read: /repos/{owner}/{repo}/pulls/{n}
 		s.bump("head")
 		sha := s.nextHead()
@@ -238,6 +238,20 @@ func (s *ghStub) nextHead() string {
 		return sha
 	}
 	return s.heads[len(s.heads)-1]
+}
+
+// setComments swaps the issue-comment page served by the next collection.
+func (s *ghStub) setComments(body string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.comments = body
+}
+
+// commentsBody reads the current issue-comment page under the lock.
+func (s *ghStub) commentsBody() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.comments
 }
 
 // serveREST writes one REST page with rate-budget headers and honors

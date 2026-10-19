@@ -24,6 +24,8 @@ func TestUsageContent(t *testing.T) {
 		"wait          block until new events arrive or --timeout elapses",
 		"store path    print the resolved store directory; never opens the store",
 		"reconcile → wait → ack",
+		"issue URL (/issues/N)",
+		"--skip-head-changed, and",
 		"acknowledges nothing",
 		`exactly one JSON envelope with a "status" field`,
 		"Operational errors exit 1, usage errors",

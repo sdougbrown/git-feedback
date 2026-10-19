@@ -15,6 +15,7 @@ func TestParseTargetGitHub(t *testing.T) {
 		num  int
 		host string
 		repo string
+		kind string
 	}{
 		{
 			name: "plain",
@@ -50,6 +51,31 @@ func TestParseTargetGitHub(t *testing.T) {
 			host: "github.com",
 			repo: "Owner/Repo",
 		},
+		{
+			name: "issue",
+			raw:  "https://github.com/owner/repo/issues/1993",
+			want: "github:github.com:owner/repo:1993",
+			num:  1993,
+			host: "github.com",
+			repo: "owner/repo",
+			kind: forge.TargetKindIssue,
+		},
+		{
+			name: "issue with comment anchor",
+			raw:  "https://github.com/owner/repo/issues/1993#issuecomment-1234",
+			want: "github:github.com:owner/repo:1993",
+			num:  1993,
+			kind: forge.TargetKindIssue,
+		},
+		{
+			name: "issue display spelling",
+			raw:  "https://GitHub.com/Owner/Repo/Issues/7/",
+			want: "github:github.com:owner/repo:7",
+			num:  7,
+			host: "github.com",
+			repo: "Owner/Repo",
+			kind: forge.TargetKindIssue,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,6 +101,12 @@ func TestParseTargetGitHub(t *testing.T) {
 			if got.URL != tc.raw {
 				t.Errorf("URL = %q, want %q", got.URL, tc.raw)
 			}
+			if got.Kind != tc.kind {
+				t.Errorf("Kind = %q, want %q", got.Kind, tc.kind)
+			}
+			if got.IsIssue() != (tc.kind == forge.TargetKindIssue) {
+				t.Errorf("IsIssue() = %t for kind %q", got.IsIssue(), tc.kind)
+			}
 		})
 	}
 }
@@ -92,9 +124,22 @@ func TestUnsupportedHost(t *testing.T) {
 	}
 }
 
-func TestGitHubNonPullURL(t *testing.T) {
-	_, err := ParseTarget("https://github.com/owner/repo/issues/5")
-	if !errors.Is(err, forge.ErrNotFound) {
-		t.Errorf("error = %v, want ErrNotFound", err)
+func TestGitHubNonTargetURL(t *testing.T) {
+	// A GitHub.com URL that is neither a pull request nor an issue is not a
+	// target. An /issues/N URL is a target even when N names a pull request:
+	// the spelling decides the target kind (see docs/contract.md).
+	for _, raw := range []string{
+		"https://github.com/owner/repo",
+		"https://github.com/owner/repo/discussions/5",
+		"https://github.com/owner/repo/issues",
+		"https://github.com/owner/repo/pulls/5",
+		// A non-numeric number is not a target: the pattern's ([0-9]+)
+		// tail rejects it, so both spellings fall through to ErrNotFound.
+		"https://github.com/owner/repo/pull/abc",
+		"https://github.com/owner/repo/issues/abc",
+	} {
+		if _, err := ParseTarget(raw); !errors.Is(err, forge.ErrNotFound) {
+			t.Errorf("ParseTarget(%q) error = %v, want ErrNotFound", raw, err)
+		}
 	}
 }

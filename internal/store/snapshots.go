@@ -137,14 +137,22 @@ type objectRow struct {
 }
 
 // resolveOrCreateStream returns the stream_id and current_snapshot_id for
-// (target, account), creating the target row on first sight.
+// (target, account), creating the target row on first sight. When the stream
+// already exists, it validates the target's kind against the stored target:
+// the store keys streams on target ID only, so /pull/9 and /issues/9 share
+// one stream, and a kind flip would publish the wrong inventory onto the
+// existing stream.
 func resolveOrCreateStream(ctx context.Context, tx *sql.Tx, in PublishInput, account string) (int64, int64, error) {
 	var streamID, snapID int64
+	var storedJSON string
 	err := tx.QueryRowContext(ctx,
-		`SELECT stream_id, COALESCE(current_snapshot_id, 0) FROM targets WHERE target_id = ? AND account = ?`,
-		in.Target.ID, account).Scan(&streamID, &snapID)
+		`SELECT stream_id, COALESCE(current_snapshot_id, 0), target_json FROM targets WHERE target_id = ? AND account = ?`,
+		in.Target.ID, account).Scan(&streamID, &snapID, &storedJSON)
 	switch {
 	case err == nil:
+		if _, err := decodeStoredTarget(storedJSON, in.Target); err != nil {
+			return 0, 0, err
+		}
 		return streamID, snapID, nil
 	case err != sql.ErrNoRows:
 		return 0, 0, &Error{Code: CodeStore, Message: fmt.Sprintf("resolve stream: %v", err)}
@@ -332,6 +340,36 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// kindMismatchMessage builds the kind-flip rejection message, pointing at
+// `store reset --target` as the remedy.
+func kindMismatchMessage(fresh, stored forge.Target) string {
+	return fmt.Sprintf("target %s is stored as %s but the URL names %s; run `store reset --target <URL>` to re-baseline", fresh.ID, kindName(stored), kindName(fresh))
+}
+
+// kindName renders a target's kind for the kind-flip rejection message.
+func kindName(t forge.Target) string {
+	if t.IsIssue() {
+		return "issue"
+	}
+	return "pull request"
+}
+
+// decodeStoredTarget decodes the stored target_json and rejects a kind
+// flip against the requested target. An undecodable target_json is
+// CodeStoreCorrupt; a stored kind that differs from the requested kind is
+// CodeTargetKindMismatch. It returns the decoded target for callers that
+// need it (e.g. StoredTarget).
+func decodeStoredTarget(targetJSON string, requested forge.Target) (forge.Target, error) {
+	var stored forge.Target
+	if err := json.Unmarshal([]byte(targetJSON), &stored); err != nil {
+		return forge.Target{}, &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("decode stored target: %v", err)}
+	}
+	if stored.IsIssue() != requested.IsIssue() {
+		return forge.Target{}, &Error{Code: CodeTargetKindMismatch, Message: kindMismatchMessage(requested, stored)}
+	}
+	return stored, nil
 }
 
 // emitEvents writes the object and target events for a changed inventory and
@@ -575,8 +613,13 @@ func threadCommentChanges(prior, cur []forge.ThreadComment) (authors []string, r
 // synthetic target object is excluded), and the last successful complete
 // observation time for the snapshot.
 type SnapshotSummary struct {
-	ID             string
-	Head           string
+	ID   string
+	Head string
+	// HasHead reports whether the snapshot carries a head (a pull request
+	// snapshot always does; an issue snapshot never does). It is derived
+	// as Head != "", mirroring the collection-time Snapshot.HasHead, and
+	// exists so consumer sites don't each re-derive the invariant.
+	HasHead        bool
 	CollectedStart time.Time
 	CollectedEnd   time.Time
 	Threads        int
@@ -586,25 +629,33 @@ type SnapshotSummary struct {
 }
 
 // CurrentSnapshot returns the current snapshot summary for one stream, or
-// false when the stream has no snapshot (or does not exist).
-func (s *Store) CurrentSnapshot(ctx context.Context, targetID, account string) (SnapshotSummary, bool, error) {
+// false when the stream has no snapshot (or does not exist). When the
+// stored target's kind differs from the requested target's kind, it
+// returns CodeTargetKindMismatch.
+func (s *Store) CurrentSnapshot(ctx context.Context, targetID, account string, requested forge.Target) (SnapshotSummary, bool, error) {
 	var sum SnapshotSummary
 	var streamID, snapID int64
 	var start, end, observedAt sql.NullString
+	var targetJSON string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT t.stream_id, s.id, s.head, s.collected_start, s.collected_end,
 		       (SELECT MAX(o.observed_at) FROM observations o
-		         WHERE o.stream_id = t.stream_id AND o.snapshot_id = s.id)
+		         WHERE o.stream_id = t.stream_id AND o.snapshot_id = s.id),
+		       t.target_json
 		FROM targets t JOIN snapshots s ON s.id = t.current_snapshot_id
 		WHERE t.target_id = ? AND t.account = ?`,
 		targetID, forge.CanonicalAccount(account)).Scan(
-		&streamID, &snapID, &sum.Head, &start, &end, &observedAt)
+		&streamID, &snapID, &sum.Head, &start, &end, &observedAt, &targetJSON)
 	if err == sql.ErrNoRows {
 		return SnapshotSummary{}, false, nil
 	}
 	if err != nil {
 		return SnapshotSummary{}, false, &Error{Code: CodeStore, Message: fmt.Sprintf("read current snapshot: %v", err)}
 	}
+	if _, err := decodeStoredTarget(targetJSON, requested); err != nil {
+		return SnapshotSummary{}, false, err
+	}
+	sum.HasHead = sum.Head != ""
 	stamps := []struct {
 		col string
 		dst *time.Time
