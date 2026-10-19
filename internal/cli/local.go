@@ -241,14 +241,15 @@ func stamp(t time.Time) string {
 }
 
 // mapStoreError converts store errors: caller mistakes (malformed cursor,
-// invalid consumer name) are usage errors; everything else is operational.
+// invalid consumer name, target kind flip) are usage errors; everything
+// else is operational.
 func mapStoreError(err error) error {
 	var se *store.Error
 	if !errors.As(err, &se) {
 		return err
 	}
 	switch se.Code {
-	case store.CodeInvalidCursor, store.CodeInvalidConsumer:
+	case store.CodeInvalidCursor, store.CodeInvalidConsumer, store.CodeTargetKindMismatch:
 		return &usageError{se.Message}
 	}
 	return &statusError{code: se.Code, message: se.Message}

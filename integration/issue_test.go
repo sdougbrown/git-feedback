@@ -3,6 +3,7 @@ package integration
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -121,10 +122,10 @@ func TestIssueTargetEndToEnd(t *testing.T) {
 }
 
 // TestIssueKindFlipRemedyLoop: the documented kind-flip remedy — a PR
-// stream is seeded, an /issues/N reconcile for the same number is rejected
-// with target_kind_mismatch, `store reset --target` re-baselines the stream
-// under the issue kind, and the next reconcile succeeds with comments-only
-// endpoint counts.
+// stream is seeded, an /issues/N reconcile for the same number is
+// rejected as a usage error (exit 2) naming the kind flip, `store reset
+// --target` re-baselines the stream under the issue kind, and the next
+// reconcile succeeds with comments-only endpoint counts.
 func TestIssueKindFlipRemedyLoop(t *testing.T) {
 	stub := newStub(t)
 	env := testEnv(fakeGHPath(t), stub.srv.URL, map[string]string{"GIT_FEEDBACK_MIN_INTERVAL": "100ms"})
@@ -140,16 +141,26 @@ func TestIssueKindFlipRemedyLoop(t *testing.T) {
 	// those from the issue reconcile's reads below.
 	baseline := time.Now()
 
-	// 2. An /issues/N reconcile for the same number is rejected.
+	// 2. An /issues/N reconcile for the same number is rejected as a
+	// usage error (exit 2) naming the kind flip.
 	res := runCLI(boundedCtx(t), t, tagged, env, append([]string{"reconcile", flipURL, "--json"}, stateArg(dir)...)...)
-	if res.Code != 1 {
-		t.Fatalf("exit = %d, want 1 (stderr=%q stdout=%s)", res.Code, res.Stderr, res.Stdout)
+	if res.Code != 2 {
+		t.Fatalf("exit = %d, want 2 (stderr=%q stdout=%s)", res.Code, res.Stderr, res.Stdout)
 	}
 	if s := statusOf(t, res.Env); s != "error" {
 		t.Fatalf("status = %q, want error", s)
 	}
-	if code := errorCode(t, res.Env); code != "target_kind_mismatch" {
-		t.Fatalf("error.code = %q, want target_kind_mismatch", code)
+	if code := errorCode(t, res.Env); code != "usage" {
+		t.Fatalf("error.code = %q, want usage", code)
+	}
+	var e struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(res.Env["error"], &e); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if !strings.Contains(e.Message, "store reset --target") {
+		t.Fatalf("error.message = %q, want the kind-flip remedy", e.Message)
 	}
 
 	// 3. store reset --target re-baselines the stream under the issue kind.

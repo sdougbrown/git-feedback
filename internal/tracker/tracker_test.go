@@ -838,6 +838,45 @@ func TestReconcileKindMismatchFailsFast(t *testing.T) {
 	})
 }
 
+// TestReconcileAdmitBusyDefersKindFlip: a kind-flipped URL whose
+// bootstrap admission is busy short-circuits Reconcile with the clean
+// busy envelope before the early kind-flip check runs, deferring the
+// detection to a later cycle (the documented admit short-circuit). No
+// session is supplied, so admit runs.
+func TestReconcileAdmitBusyDefersKindFlip(t *testing.T) {
+	const issueURL = "https://github.com/owner/name/issues/7"
+	e := newEnv(t)
+	// Seed a PR stream so the issue URL is a kind flip.
+	_, err := e.st.Publish(context.Background(), store.PublishInput{
+		Target:  forge.NewTarget("github", "github.com", "owner/name", 7, testURL),
+		Account: "alice",
+		Snapshot: &forge.Snapshot{
+			Head:           "headA",
+			CollectedStart: time.Now().Add(-time.Minute),
+			CollectedEnd:   time.Now(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed PR stream: %v", err)
+	}
+	// Hold the bootstrap lease with a foreign token so admit is busy.
+	if err := e.st.AcquireBootstrapLease(context.Background(), testHost, "foreign", time.Minute, e.clk.Now()); err != nil {
+		t.Fatalf("hold bootstrap lease: %v", err)
+	}
+	adapter := &countingAdapter{}
+	e.eng.NewAdapter = func(svcs Services) forge.Adapter { return adapter }
+	res, err := e.eng.Reconcile(context.Background(), ReconcileInput{URL: issueURL})
+	if err != nil {
+		t.Fatalf("reconcile: %v, want the clean busy envelope (no error)", err)
+	}
+	if res.Status != StatusBusy {
+		t.Fatalf("status = %s, want busy (admit short-circuits before the kind-flip check)", res.Status)
+	}
+	if adapter.collects != 0 {
+		t.Fatalf("adapter.Collect invoked %d times, want 0", adapter.collects)
+	}
+}
+
 // TestWaitSignalCancellationReturnsErrorOutcome: a signal-like
 // cancellation (context.Canceled, as signal.NotifyContext produces on
 // SIGINT/SIGTERM) of a run whose cycles keep failing must end the wait

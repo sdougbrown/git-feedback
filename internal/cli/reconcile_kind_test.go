@@ -58,10 +58,11 @@ func kindFlipStub(t *testing.T) *httptest.Server {
 }
 
 // TestReconcileKindMismatchEnvelope: a reconcile whose URL names a
-// different kind than the stored stream fails with target_kind_mismatch
-// through the generic store-error passthrough in mapReconcileError,
-// before any collection. This is the reconcile/wait counterpart of
-// TestLocalKindFlipEnvelope (which covers the local-command path).
+// different kind than the stored stream is a caller error: it fails
+// with the usage error (exit 2) naming the kind flip through
+// mapReconcileError, before any collection. This is the
+// reconcile counterpart of TestLocalKindFlipEnvelope (which covers
+// the local-command path).
 func TestReconcileKindMismatchEnvelope(t *testing.T) {
 	stub := kindFlipStub(t)
 	t.Cleanup(stub.Close)
@@ -72,15 +73,18 @@ func TestReconcileKindMismatchEnvelope(t *testing.T) {
 	publishHandler(t, st, "alice")
 
 	code, env, _ := runCLI(t, []string{"reconcile", "--state-dir", dir, "https://github.com/owner/name/issues/7"})
-	if code != 1 {
-		t.Fatalf("exit = %d, want 1 (%v)", code, env["error"])
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (%v)", code, env["error"])
 	}
 	assertContract(t, env)
 	if env["status"] != "error" {
 		t.Errorf("status = %v, want error", env["status"])
 	}
 	errObj := env["error"].(map[string]any)
-	if errObj["code"] != "target_kind_mismatch" {
-		t.Errorf("error.code = %v, want target_kind_mismatch", errObj["code"])
+	if errObj["code"] != "usage" {
+		t.Errorf("error.code = %v, want usage", errObj["code"])
+	}
+	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "store reset --target") {
+		t.Errorf("error.message = %q, want the kind-flip remedy", msg)
 	}
 }

@@ -223,23 +223,27 @@ func TestAmbiguousAccountError(t *testing.T) {
 }
 
 // TestLocalKindFlipEnvelope: a local command whose URL names a different
-// kind than the stored stream fails with target_kind_mismatch through
-// localEnvelope, before any inbox read.
+// kind than the stored stream is a caller error: it fails with the
+// usage error (exit 2) naming the kind flip through localEnvelope,
+// before any inbox read.
 func TestLocalKindFlipEnvelope(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishHandler(t, st, "alice")
 
 	code, env, _ := runCLI(t, []string{"inbox", "--consumer", "ci", "--state-dir", dir, "https://github.com/owner/name/issues/7"})
-	if code != 1 {
-		t.Fatalf("exit = %d, want 1 (%v)", code, env["error"])
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (%v)", code, env["error"])
 	}
 	assertContract(t, env)
 	if env["status"] != "error" {
 		t.Errorf("status = %v, want error", env["status"])
 	}
 	errObj := env["error"].(map[string]any)
-	if errObj["code"] != "target_kind_mismatch" {
-		t.Errorf("error.code = %v, want target_kind_mismatch", errObj["code"])
+	if errObj["code"] != "usage" {
+		t.Errorf("error.code = %v, want usage", errObj["code"])
+	}
+	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "store reset --target") {
+		t.Errorf("error.message = %q, want the kind-flip remedy", msg)
 	}
 }
 
