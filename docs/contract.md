@@ -98,7 +98,9 @@ identically for both target kinds.
   request, and GitHub's redirect only applies to the HTML page, not the API.
   Such a target collects comments only. Use the `/pull/N` URL for full pull
   request collection — the number, and therefore the target ID, is the same
-  either way.
+  either way. Switching the spelling on an existing stream is rejected with
+  `target_kind_mismatch`; `store reset --target` re-baselines the stream under
+  the other kind.
 
 ## Inbox cursor
 

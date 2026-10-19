@@ -78,7 +78,14 @@ func TestIssueTargetEndToEnd(t *testing.T) {
 		runOK(t, env, 30*time.Second, issueAckArgs(dir, id)...)
 	}
 
-	stub.setComments(`[{"id":31,"user":{"login":"rev"},"body":"contract accepted","created_at":"2026-01-01T00:00:00Z","html_url":"https://github.com/owner/name/issues/9#issuecomment-31"}]`)
+	// Post a reviewer comment alongside one authored by the stream account
+	// (alice, the fake gh login). The default self filter must drop
+	// alice's event and deliver only rev's, pinning the documented
+	// delivery-time self filter on issue targets.
+	stub.setComments(`[
+		{"id":31,"user":{"login":"rev"},"body":"contract accepted","created_at":"2026-01-01T00:00:00Z","html_url":"https://github.com/owner/name/issues/9#issuecomment-31"},
+		{"id":32,"user":{"login":"alice"},"body":"on it","created_at":"2026-01-01T00:01:00Z","html_url":"https://github.com/owner/name/issues/9#issuecomment-32"}
+	]`)
 
 	// The pull-request-only flags have nothing to act on here and are
 	// accepted without changing the outcome.
@@ -95,7 +102,7 @@ func TestIssueTargetEndToEnd(t *testing.T) {
 		t.Fatalf("event kinds = %v, want one first-sight comment observation", kinds)
 	}
 	if ids := eventObjectIDs(t, envOut); len(ids) != 1 || ids[0] != "31" {
-		t.Fatalf("event object IDs = %v, want [31]", ids)
+		t.Fatalf("event object IDs = %v, want [31] (the self-authored 32 is filtered by the default self filter)", ids)
 	}
 	if authors := eventAuthors(t, envOut); len(authors) != 1 || authors[0] != "rev" {
 		t.Fatalf("event authors = %v, want [rev]", authors)

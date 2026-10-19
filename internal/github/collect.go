@@ -111,8 +111,6 @@ func (a *Adapter) collect(ctx context.Context, tp *Transport, t forge.Target, o 
 	inv.Snapshot.Head = headBefore
 	inv.Snapshot.CollectedStart = start
 	inv.Snapshot.CollectedEnd = inv.CollectedEnd
-	// Synthetic target object: metadata tracking the stable collected head.
-	inv.Objects = append(inv.Objects, Object{Kind: forge.KindTarget, ProviderID: t.ID, Head: inv.Head})
 
 	for _, th := range threads {
 		ft, err := normalizeThread(th)
@@ -140,18 +138,10 @@ func (a *Adapter) collect(ctx context.Context, tp *Transport, t forge.Target, o 
 			Review:      fr,
 		})
 	}
-	for _, cm := range comments {
-		fc, err := normalizeComment(cm)
-		if err != nil {
-			return Inventory{Head: headBefore, Rates: st.rates}, err
-		}
-		inv.Snapshot.Comments = append(inv.Snapshot.Comments, *fc)
-		inv.Objects = append(inv.Objects, Object{
-			Kind:        forge.KindComment,
-			ProviderID:  fmt.Sprintf("%d", cm.ID),
-			Fingerprint: forge.FingerprintComment(*fc),
-			Comment:     fc,
-		})
+	// Synthetic target object + conversation comments, shared with the
+	// issue path.
+	if err := a.appendTargetAndComments(&inv, t, headBefore, comments); err != nil {
+		return Inventory{Head: headBefore, Rates: st.rates}, err
 	}
 	return inv, nil
 }
@@ -175,12 +165,25 @@ func (a *Adapter) collectIssue(ctx context.Context, tp *Transport, t forge.Targe
 	}
 	inv.Snapshot.CollectedStart = start
 	inv.Snapshot.CollectedEnd = inv.CollectedEnd
-	// Synthetic target object: metadata without a stable head.
-	inv.Objects = append(inv.Objects, Object{Kind: forge.KindTarget, ProviderID: t.ID})
+	// Synthetic target object + conversation comments, shared with the
+	// pull request path. The issue target has no head.
+	if err := a.appendTargetAndComments(&inv, t, "", comments); err != nil {
+		return Inventory{Rates: st.rates}, err
+	}
+	return inv, nil
+}
+
+// appendTargetAndComments appends the synthetic target object and the
+// normalized conversation comments to inv, shared by the pull request and
+// issue collection paths. head is the stable collected head (empty for an
+// issue target, which has no head). It returns the first normalize error,
+// if any; the caller carries the collected rates in its error return.
+func (a *Adapter) appendTargetAndComments(inv *Inventory, t forge.Target, head string, comments []restComment) error {
+	inv.Objects = append(inv.Objects, Object{Kind: forge.KindTarget, ProviderID: t.ID, Head: head})
 	for _, cm := range comments {
 		fc, err := normalizeComment(cm)
 		if err != nil {
-			return inv, err
+			return err
 		}
 		inv.Snapshot.Comments = append(inv.Snapshot.Comments, *fc)
 		inv.Objects = append(inv.Objects, Object{
@@ -190,5 +193,5 @@ func (a *Adapter) collectIssue(ctx context.Context, tp *Transport, t forge.Targe
 			Comment:     fc,
 		})
 	}
-	return inv, nil
+	return nil
 }

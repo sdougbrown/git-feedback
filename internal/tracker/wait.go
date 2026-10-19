@@ -506,6 +506,13 @@ func isStoreOpenError(err error) bool {
 // fatalWaitError reports whether one reconciliation failure must end the
 // wait immediately instead of being retried until the deadline.
 func fatalWaitError(err error) bool {
+	// A kind flip is a caller error (the URL names a different kind than
+	// the stored stream), not a transient failure: surface it immediately
+	// instead of retrying until the deadline.
+	var se *store.Error
+	if errors.As(err, &se) && se.Code == store.CodeTargetKindMismatch {
+		return true
+	}
 	return errors.Is(err, forge.ErrAuth) ||
 		errors.Is(err, forge.ErrNotFound) ||
 		errors.Is(err, forge.ErrAccountMismatch) ||

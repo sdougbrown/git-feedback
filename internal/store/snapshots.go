@@ -137,14 +137,26 @@ type objectRow struct {
 }
 
 // resolveOrCreateStream returns the stream_id and current_snapshot_id for
-// (target, account), creating the target row on first sight.
+// (target, account), creating the target row on first sight. When the stream
+// already exists, it validates the target's kind against the stored target:
+// the store keys streams on target ID only, so /pull/9 and /issues/9 share
+// one stream, and a kind flip would publish the wrong inventory onto the
+// existing stream.
 func resolveOrCreateStream(ctx context.Context, tx *sql.Tx, in PublishInput, account string) (int64, int64, error) {
 	var streamID, snapID int64
+	var storedJSON string
 	err := tx.QueryRowContext(ctx,
-		`SELECT stream_id, COALESCE(current_snapshot_id, 0) FROM targets WHERE target_id = ? AND account = ?`,
-		in.Target.ID, account).Scan(&streamID, &snapID)
+		`SELECT stream_id, COALESCE(current_snapshot_id, 0), target_json FROM targets WHERE target_id = ? AND account = ?`,
+		in.Target.ID, account).Scan(&streamID, &snapID, &storedJSON)
 	switch {
 	case err == nil:
+		var stored forge.Target
+		if err := json.Unmarshal([]byte(storedJSON), &stored); err != nil {
+			return 0, 0, &Error{Code: CodeStoreCorrupt, Message: fmt.Sprintf("decode stored target: %v", err)}
+		}
+		if stored.IsIssue() != in.Target.IsIssue() {
+			return 0, 0, &Error{Code: CodeTargetKindMismatch, Message: kindMismatchMessage(in.Target, stored)}
+		}
 		return streamID, snapID, nil
 	case err != sql.ErrNoRows:
 		return 0, 0, &Error{Code: CodeStore, Message: fmt.Sprintf("resolve stream: %v", err)}
@@ -332,6 +344,20 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// kindMismatchMessage builds the kind-flip rejection message, pointing at
+// `store reset --target` as the remedy.
+func kindMismatchMessage(fresh, stored forge.Target) string {
+	return fmt.Sprintf("target %s is stored as a %s but the URL names a %s; run `store reset --target <URL>` to re-baseline", fresh.ID, kindName(stored), kindName(fresh))
+}
+
+// kindName renders a target's kind for the kind-flip rejection message.
+func kindName(t forge.Target) string {
+	if t.IsIssue() {
+		return "issue"
+	}
+	return "pull request"
 }
 
 // emitEvents writes the object and target events for a changed inventory and

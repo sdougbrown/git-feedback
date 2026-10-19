@@ -128,9 +128,10 @@ reset --target` — works the same way.
 - **`--exclude-self` matters most.** Each agent posts as its human's account,
   so the default self filter is what stops it waking on its own comments.
 - **`/issues/N` on a pull request number stays an issue target.** The URL
-  spelling decides the kind; such a target collects comments only. Use the
+  decides the kind; such a target collects comments only. Use the
   `/pull/N` URL for full pull request collection (the number, and therefore
-  the target ID, is the same either way).
+  the target ID, is the same either way). Switching the spelling on an
+  existing stream is rejected; `store reset --target` re-baselines it.
 
 A tracking issue is a natural home for a cross-repo contract: each side posts
 with `gh issue comment`, then arms `git-feedback wait` on the issue URL to be

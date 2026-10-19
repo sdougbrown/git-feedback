@@ -205,10 +205,20 @@ func TestCollectAllPages(t *testing.T) {
 	if len(inv.Objects) != 152 {
 		t.Fatalf("want 152 objects, got %d", len(inv.Objects))
 	}
-	if inv.Objects[0].Kind != "target" || inv.Objects[0].ProviderID != inv.Target.ID || inv.Objects[0].Head != inv.Head {
-		t.Fatalf("target object wrong: %+v", inv.Objects[0])
+	var targetObj *Object
+	for i := range inv.Objects {
+		if inv.Objects[i].Kind == forge.KindTarget {
+			targetObj = &inv.Objects[i]
+			break
+		}
 	}
-	for _, o := range inv.Objects[1:] {
+	if targetObj == nil || targetObj.ProviderID != inv.Target.ID || targetObj.Head != inv.Head {
+		t.Fatalf("target object wrong: %+v", targetObj)
+	}
+	for _, o := range inv.Objects {
+		if o.Kind == forge.KindTarget {
+			continue // the synthetic target has no fingerprint
+		}
 		if o.Fingerprint == "" {
 			t.Fatalf("object %s missing fingerprint", o.ProviderID)
 		}
@@ -282,6 +292,30 @@ func TestCollectIssueTargetOnlyComments(t *testing.T) {
 	}
 	if res.HeadBefore != "" || res.HeadAfter != "" {
 		t.Fatalf("Collect heads = %q/%q, want empty", res.HeadBefore, res.HeadAfter)
+	}
+}
+
+// TestCollectIssueTargetCommentsFailure: a non-200 conversation comments
+// page fails the attempt and the result is not Complete, mirroring the
+// GQL-abort tests.
+func TestCollectIssueTargetCommentsFailure(t *testing.T) {
+	stub := baseStub(t)
+	stub.rest["comments"] = []restPageSpec{{status: http.StatusBadGateway}}
+	adapter, sess := newCollectEnv(t, stub)
+	target, err := ParseTarget("https://github.com/o/r/issues/9")
+	if err != nil {
+		t.Fatalf("ParseTarget: %v", err)
+	}
+
+	res, err := adapter.Collect(context.Background(), sess, target, forge.CollectOptions{})
+	if err == nil {
+		t.Fatal("a non-200 comments page must fail the attempt")
+	}
+	if !errors.Is(err, forge.ErrIncomplete) {
+		t.Fatalf("want ErrIncomplete, got %v", err)
+	}
+	if res.Complete || res.Snapshot != nil {
+		t.Fatalf("a failed attempt must not be complete: %+v", res)
 	}
 }
 
@@ -827,7 +861,10 @@ func TestNullAuthorTolerated(t *testing.T) {
 	if len(inv1.Objects) != len(inv2.Objects) {
 		t.Fatalf("object count changed between collects: %d → %d", len(inv1.Objects), len(inv2.Objects))
 	}
-	for i := 1; i < len(inv1.Objects); i++ { // skip synthetic target (no fingerprint)
+	for i := range inv1.Objects { // skip the synthetic target (no fingerprint)
+		if inv1.Objects[i].Kind == forge.KindTarget {
+			continue
+		}
 		if inv1.Objects[i].Fingerprint != inv2.Objects[i].Fingerprint {
 			t.Fatalf("fingerprint not stable for %s: %s != %s", inv1.Objects[i].ProviderID, inv1.Objects[i].Fingerprint, inv2.Objects[i].Fingerprint)
 		}

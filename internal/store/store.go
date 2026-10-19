@@ -35,6 +35,7 @@ const (
 	CodeExportStateDir     = "export_state_dir"
 	CodeExportUnsupported  = "export_unsupported"
 	CodeInvalidDestination = "invalid_destination"
+	CodeTargetKindMismatch = "target_kind_mismatch"
 )
 
 // Error is a typed store error carrying a stable code.
