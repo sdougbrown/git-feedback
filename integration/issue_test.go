@@ -2,6 +2,7 @@ package integration
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -116,5 +117,53 @@ func TestIssueTargetEndToEnd(t *testing.T) {
 	}
 	if ids := eventIDs(t, runOK(t, env, 30*time.Second, issueInboxArgs(dir)...)); len(ids) != 0 {
 		t.Fatalf("pending events after ack = %v, want none", ids)
+	}
+}
+
+// TestIssueKindFlipRemedyLoop: the documented kind-flip remedy — a PR
+// stream is seeded, an /issues/N reconcile for the same number is rejected
+// with target_kind_mismatch, `store reset --target` re-baselines the stream
+// under the issue kind, and the next reconcile succeeds with comments-only
+// endpoint counts.
+func TestIssueKindFlipRemedyLoop(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, map[string]string{"GIT_FEEDBACK_MIN_INTERVAL": "100ms"})
+	dir := testState(t)
+	tagged := filepath.Join(repoRoot, "bin", "git-feedback-test")
+
+	prURL := "https://github.com/owner/name/pull/9"
+	flipURL := "https://github.com/owner/name/issues/9"
+
+	// 1. Seed a PR stream.
+	assertStatusUpdated(t, runOK(t, env, 90*time.Second, append([]string{"reconcile", prURL, "--json"}, stateArg(dir)...)...))
+	// The PR seed reads the pull request endpoints; the baseline separates
+	// those from the issue reconcile's reads below.
+	baseline := time.Now()
+
+	// 2. An /issues/N reconcile for the same number is rejected.
+	res := runCLI(boundedCtx(t), t, tagged, env, append([]string{"reconcile", flipURL, "--json"}, stateArg(dir)...)...)
+	if res.Code != 1 {
+		t.Fatalf("exit = %d, want 1 (stderr=%q stdout=%s)", res.Code, res.Stderr, res.Stdout)
+	}
+	if s := statusOf(t, res.Env); s != "error" {
+		t.Fatalf("status = %q, want error", s)
+	}
+	if code := errorCode(t, res.Env); code != "target_kind_mismatch" {
+		t.Fatalf("error.code = %q, want target_kind_mismatch", code)
+	}
+
+	// 3. store reset --target re-baselines the stream under the issue kind.
+	runOK(t, env, 30*time.Second, append([]string{"store", "reset", "--target", flipURL, "--json"}, stateArg(dir)...)...)
+
+	// 4. The next reconcile succeeds with comments-only endpoint counts.
+	envOut := runOK(t, env, 90*time.Second, append([]string{"reconcile", flipURL, "--json"}, stateArg(dir)...)...)
+	assertStatusUpdated(t, envOut)
+	for _, key := range []string{"head", "threads", "nested", "reviews"} {
+		if n := len(stub.collectionTimesSince(key, baseline)); n != 0 {
+			t.Fatalf("endpoint %q served %d requests after the PR seed, want 0 for an issue target", key, n)
+		}
+	}
+	if len(stub.collectionTimesSince("comments", baseline)) == 0 {
+		t.Fatalf("the conversation comments endpoint was never read after the PR seed")
 	}
 }

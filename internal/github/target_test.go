@@ -133,6 +133,10 @@ func TestGitHubNonTargetURL(t *testing.T) {
 		"https://github.com/owner/repo/discussions/5",
 		"https://github.com/owner/repo/issues",
 		"https://github.com/owner/repo/pulls/5",
+		// A non-numeric number is not a target: the pattern's ([0-9]+)
+		// tail rejects it, so both spellings fall through to ErrNotFound.
+		"https://github.com/owner/repo/pull/abc",
+		"https://github.com/owner/repo/issues/abc",
 	} {
 		if _, err := ParseTarget(raw); !errors.Is(err, forge.ErrNotFound) {
 			t.Errorf("ParseTarget(%q) error = %v, want ErrNotFound", raw, err)
