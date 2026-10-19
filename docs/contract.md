@@ -45,17 +45,60 @@ Every subcommand writes exactly one JSON value to stdout. The one exception:
 
 ## Events
 
-- Event kinds: `initial_observation`, `revision`, `not_observed`, `head_changed`. A feedback object reappearing after `not_observed` gets a new `revision`.
+- Event kinds: `initial_observation`, `revision`, `not_observed`, `head_changed`. A feedback object reappearing after `not_observed` gets a new `revision`. `head_changed` applies to pull request targets only; issue targets have no head (see "Issue targets").
 - Event fields: `id, kind, object_kind, object_id, revision, url, snapshot_id, observed_at, author`; head events also carry `head_before` and `head_after`. `author` is the object's authoring login and appears only when non-empty (author-less and synthetic target events omit it). Counters are per `(stream_id, object_kind, object_id)`, starting at 1 and increasing for every observed occurrence, including disappearance/reappearance.
 - Delivery-time self filter: events whose object author equals the stream's verified account are excluded from `inbox` and `wait` delivery by default; `--exclude-self` opts back in. Author-less and legacy rows (no author) are always delivered, and store/snapshot retention are unchanged — the filter applies only at delivery.
 - Thread revision attribution: a `revision:thread` event is attributed to the authors of what changed. When every added or changed comment in the window is authored by the account, no comment was removed, and only the resolution state changed otherwise, the event's `author` is rewritten to the account so the delivery filter also applies to self-authored replies. Otherwise the event carries the thread root author. Known limitation: a thread revision whose only change is the account's own resolution state carries the thread author (a reviewer), so it is NOT filtered — the payload does not say who resolved a thread; self-authored content (own comments, own reviews, own replies) is what filters.
 - Author spellings match the REST API exactly: thread and thread-comment authors come from GraphQL, reviews and top-level comments from REST, and GitHub App logins are spelled `name[bot]` on both sides. GraphQL omits the suffix, so it is restored from `author.__typename`. Upgrade note: `author` is part of an object's fingerprint, so the first collection after upgrading emits one `revision` for each bot-authored thread whose stored fingerprint predates this spelling.
 - Delivery-time empty-review filter: with `--skip-empty-reviews`, a review event is skipped when the review, as recorded in the event's snapshot body, has state `COMMENTED` and an empty or whitespace-only body (GitHub creates such a container for each inline reply). Decision states (`APPROVED`, `CHANGES_REQUESTED`, `DISMISSED`) and events whose review is absent from the snapshot body (`not_observed`) always deliver. Skipped events stay pending; the store is unchanged.
 - Delivery-time head-change filter: with `--skip-head-changed` on `wait`, a pending event with kind `head_changed` and object kind `target` is skipped at delivery. Feedback events always deliver. Skipped events stay pending; the store is unchanged, so a flagless consumer receives them later.
-- Event `url` is the object's own URL (thread root comment, review, or comment), falling back to the target's PR URL when the object carries none; target events always carry the PR URL.
+- Event `url` is the object's own URL (thread root comment, review, or comment), falling back to the target's URL (pull request or issue) when the object carries none; target events always carry the target URL.
 - Event ID is `e<seq>` where `seq` is `INTEGER PRIMARY KEY AUTOINCREMENT` on `events`. IDs are opaque to callers and never content hashes.
 - `show <URL> --event <ID>` fetches one event's stored object content read-only: the event record renders in `events` (so a show envelope pipes into `ack --events-from -`) and the object as recorded in the event's snapshot renders in `object` — the thread with its comments, the review with its state and body, or the top-level comment. It is local store access only: no authentication, no network, and it acknowledges nothing. `object` is null for target (head) events and when the object is absent from the event's snapshot body (always so for `not_observed`); a reappearance `revision` event's snapshot contains the object, so it shows the reapplied content. The store retains its full history, so `show` works after ack; consumers can verify review-body completion markers without dropping to the forge API.
-- Initial publication emits a target `initial_observation` containing the head. A subsequent complete stable-head collection emits a target `head_changed` event when the head differs, even with identical feedback. Commit it with the new snapshot so lost output remains replayable. Head drift during collection and pinned-head mismatches instead persist incomplete-attempt metadata; they do not publish mixed-head snapshots.
+- Initial publication emits a target `initial_observation` containing the head. A subsequent complete stable-head collection emits a target `head_changed` event when the head differs, even with identical feedback. Commit it with the new snapshot so lost output remains replayable. Head drift during collection and pinned-head mismatches instead persist incomplete-attempt metadata; they do not publish mixed-head snapshots. An issue target's initial observation carries no head.
+
+## Issue targets
+
+A `<URL>` positional is a GitHub.com pull request URL (`/pull/N`) or an issue
+URL (`/issues/N`). Pull requests and issues share one number sequence per
+repository, so `<forge>:<host>:<repo>:<number>` stays unique: a number names
+exactly one target. Everything else — the store, streams, cursors, events,
+acknowledgements, `store reset --target`, and the delivery filters — works
+identically for both target kinds.
+
+- **Collection of an issue target reads only conversation comments.** The
+  comment call is the same `/repos/{repo}/issues/{n}/comments` a pull request's
+  top-level comments use, so it carries over unchanged. The pulls, reviews, and
+  review-threads calls are skipped: an issue has no head, threads, or reviews.
+- **Event kinds on an issue target.** The collected objects are comments only,
+  so a stream carries target `initial_observation` events and comment
+  `initial_observation`/`revision`/`not_observed` events. There are no `thread`,
+  `review`, or `head_changed` events. Issue state changes (closed/reopened) are
+  not collected in this version: that costs one extra request per cycle plus
+  a new snapshot field and event kind, so it is deliberately out of scope.
+- **Envelope.** `observed_head` and `expected_head` are always `null` for an
+  issue target, and `reviewer_completion` stays `"unknown"`. `snapshot.head` is
+  empty and `status` never becomes `head_changed`. An exported snapshot
+  (`snapshot` command) adds `"kind": "issue"` to its target object; pull
+  request exports are byte-identical to before.
+- **Pull-request-only options are accepted no-ops.** `--head`,
+  `--skip-head-changed`, and `--skip-empty-reviews` have nothing to act on for
+  an issue target: no head exists to pin or compare, and no `head_changed` or
+  `review` events are ever emitted. They are accepted and ignored rather than
+  rejected, so one command shape works across a target set that mixes pull
+  requests and issues. The envelope makes the pin's absence visible:
+  `expected_head` stays `null` even when `--head` was passed. A usage error
+  is also defensible, but it forces every caller to branch on the target kind
+  to keep its flags valid.
+- **`--exclude-self` matters most here.** Each agent typically posts as its
+  human's account, so the default self filter (see "Delivery-time self
+  filter") is what stops an agent waking on its own comments.
+- **An `/issues/N` URL that names a pull request stays an issue target.** The
+  URL spelling decides the target kind; classifying it costs an extra
+  request, and GitHub's redirect only applies to the HTML page, not the API.
+  Such a target collects comments only. Use the `/pull/N` URL for full pull
+  request collection — the number, and therefore the target ID, is the same
+  either way.
 
 ## Inbox cursor
 

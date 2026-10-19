@@ -98,6 +98,12 @@ func (e *Engine) Wait(ctx context.Context, in WaitInput) (WaitResult, error) {
 	if err != nil {
 		return WaitResult{}, err
 	}
+	// A pinned head is a pull-request option: an issue target has no head to
+	// compare against, so the pin is ignored rather than rejected (see
+	// docs/contract.md, "Issue targets").
+	if target.IsIssue() {
+		in.Head = ""
+	}
 	clk := e.clock()
 
 	eng, closeStore, err := e.openStoreResilient(ctx, clk)
@@ -344,7 +350,9 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 	}
 	if ok {
 		res.Snapshot = &sum
-		res.ObservedHead, res.HasObservedHead = sum.Head, true
+		// An issue target has no head: the envelope reports null rather
+		// than an empty string.
+		res.ObservedHead, res.HasObservedHead = sum.Head, sum.Head != ""
 	}
 	if in.Head != "" {
 		res.ExpectedHead, res.HasExpectedHead = in.Head, true

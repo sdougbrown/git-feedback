@@ -60,7 +60,7 @@ func wrapStoreOpenError(err error) error {
 
 // parseTarget resolves the invocation URL. Unsupported hosts are rejected
 // as an operational error before any credential lookup; malformed URLs and
-// non-pull-request GitHub URLs are caller errors.
+// GitHub URLs that are neither a pull request nor an issue are caller errors.
 func parseTarget(inv Invocation) (forge.Target, error) {
 	return parseTargetURL(inv.URL)
 }
@@ -140,8 +140,12 @@ func localEnvelope(ctx context.Context, command string, st *store.Store, clk clo
 		return r, mapStoreError(err)
 	} else if ok {
 		r.Snapshot = snapshotEnvelope(sum)
-		head := sum.Head
-		r.ObservedHead = &head
+		// An issue target has no head: the envelope reports null rather than
+		// an empty string.
+		if sum.Head != "" {
+			head := sum.Head
+			r.ObservedHead = &head
+		}
 		r.Freshness = Freshness{
 			SnapshotObservedAt: stamp(sum.ObservedAt),
 			Stale:              tracker.IsStale(sum.ObservedAt, clk.Now(), tracker.DefaultMinInterval),

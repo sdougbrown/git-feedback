@@ -169,6 +169,12 @@ func (e *Engine) Reconcile(ctx context.Context, in ReconcileInput) (Result, erro
 	if err != nil {
 		return Result{}, err
 	}
+	// A pinned head is a pull-request option: an issue target has no head to
+	// compare against, so the pin is ignored rather than rejected (see
+	// docs/contract.md, "Issue targets").
+	if target.IsIssue() {
+		in.Head = ""
+	}
 	host := forge.CanonicalHost(target.Host)
 	ttl, refresh, min := e.durations()
 	token, err := newLeaseToken()
@@ -382,7 +388,7 @@ func (e *Engine) publish(ctx context.Context, target forge.Target, host, account
 		Account:         account,
 		HasAccount:      true,
 		ObservedHead:    coll.Snapshot.Head,
-		HasObservedHead: true,
+		HasObservedHead: coll.Snapshot.Head != "",
 		Snapshot:        e.currentSnapshot(ctx, target.ID, account),
 		Attempt:         e.latestAttempt(ctx, target.ID, account),
 		Freshness:       e.freshness(ctx, target.ID, account),

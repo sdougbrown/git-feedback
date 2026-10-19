@@ -64,8 +64,13 @@ type collectState struct {
 }
 
 // collect reads the head before and after, gathers threads (GraphQL) and
-// reviews/comments (REST), and normalizes everything into forge objects.
+// reviews/comments (REST), and normalizes everything into forge objects. An
+// issue target has no head, threads, or reviews: only its conversation
+// comments are collected.
 func (a *Adapter) collect(ctx context.Context, tp *Transport, t forge.Target, o forge.CollectOptions) (Inventory, error) {
+	if t.IsIssue() {
+		return a.collectIssue(ctx, tp, t)
+	}
 	st := &collectState{}
 	start := a.clock.Now()
 	headBefore, err := a.restHead(ctx, tp, t)
@@ -139,6 +144,43 @@ func (a *Adapter) collect(ctx context.Context, tp *Transport, t forge.Target, o 
 		fc, err := normalizeComment(cm)
 		if err != nil {
 			return Inventory{Head: headBefore, Rates: st.rates}, err
+		}
+		inv.Snapshot.Comments = append(inv.Snapshot.Comments, *fc)
+		inv.Objects = append(inv.Objects, Object{
+			Kind:        forge.KindComment,
+			ProviderID:  fmt.Sprintf("%d", cm.ID),
+			Fingerprint: forge.FingerprintComment(*fc),
+			Comment:     fc,
+		})
+	}
+	return inv, nil
+}
+
+// collectIssue collects one issue target. Its conversation comments come
+// from the same REST path a pull request's issue comments use, so the
+// comment call carries over unchanged while the head, thread, and review
+// calls are skipped. The snapshot head stays empty, so an issue stream never
+// emits head events, and a pinned head has nothing to compare against.
+func (a *Adapter) collectIssue(ctx context.Context, tp *Transport, t forge.Target) (Inventory, error) {
+	st := &collectState{}
+	start := a.clock.Now()
+	comments, err := a.collectComments(ctx, tp, t, st)
+	if err != nil {
+		return Inventory{Rates: st.rates}, err
+	}
+	inv := Inventory{
+		Target:         t,
+		CollectedStart: start,
+		CollectedEnd:   a.clock.Now(),
+	}
+	inv.Snapshot.CollectedStart = start
+	inv.Snapshot.CollectedEnd = inv.CollectedEnd
+	// Synthetic target object: metadata without a stable head.
+	inv.Objects = append(inv.Objects, Object{Kind: forge.KindTarget, ProviderID: t.ID})
+	for _, cm := range comments {
+		fc, err := normalizeComment(cm)
+		if err != nil {
+			return inv, err
 		}
 		inv.Snapshot.Comments = append(inv.Snapshot.Comments, *fc)
 		inv.Objects = append(inv.Objects, Object{

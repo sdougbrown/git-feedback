@@ -31,6 +31,12 @@ Typical flow:
   wait delivers pending events; ack records their receipt. wait itself
   acknowledges nothing, so an interrupted consumer replays the same events.
 
+Targets:
+  <URL> is a GitHub.com pull request URL (/pull/N) or issue URL (/issues/N).
+  An issue target collects its conversation comments only: observed_head and
+  expected_head stay null, and --head, --skip-head-changed, and
+  --skip-empty-reviews have nothing to act on.
+
 Contract:
   Every subcommand writes exactly one JSON envelope with a "status" field to
   stdout; diagnostics go to stderr. Operational errors exit 1, usage errors
