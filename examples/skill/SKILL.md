@@ -157,8 +157,9 @@ git-feedback wait <PR_URL> --consumer <WATCH_CONSUMER> --timeout 30m --skip-empt
   `reviewer_completion` is always `unknown`; use the reviewer's own completion
   signal. `show` reads a review's stored body from the local store, so a
   completion marker in a review body can be verified without the forge API.
-- Do not run `reconcile` by hand while a `wait` is armed; it consumes the
-  change the watcher would report.
+- Do not run `reconcile` by hand while a `wait` is armed; a manual cycle never
+  destroys events — only `ack` retires them — but it duplicates processing and
+  advances the shared `next_due`, deferring the watcher's next collection.
 - Do not use the repo's `examples/watch-loop.sh` in agent loops. It acks on
   delivery, before anything handles the batch.
 
