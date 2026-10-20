@@ -219,10 +219,12 @@ are conventions for harness authors, not tool behavior.
   summary comments. v1 does not classify own-actions, so the
   ack-after-handling baseline keeps self-noise from compounding.
 - **Do not run ad-hoc reconciles while the monitor holds the edge.** A
-  manual reconcile between polls consumes the change the watcher was about
-  to report. If polling is needed, poll through `wait` rather than
-  out-of-band refreshes. The reconcile engine is self-gating, so the
-  cadence stays rate-safe.
+  manual reconcile between polls does not destroy events — only acks
+  retire them, and the watcher re-checks the backlog every cycle — but it
+  duplicates processing and advances the shared `next_due`, deferring the
+  watcher's next collection. If polling is needed, poll through `wait`
+  rather than out-of-band refreshes. The reconcile engine is self-gating,
+  so the cadence stays rate-safe.
 - **An inbox-only watcher is blind.** The local store never refreshes by
   itself; a watcher that only polls `inbox` sees nothing new. Poll with
   `reconcile`/`wait` so collection happens on the watch cadence. Reconcile
