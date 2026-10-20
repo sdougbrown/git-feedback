@@ -150,8 +150,9 @@ git-feedback wait <PR_URL> --consumer <WATCH_CONSUMER> --timeout 30m --skip-empt
   feedback events always deliver. The events stay pending for a reader without
   the flag.
 - A new watcher consumer's first `wait` returns at once with the stored
-  baseline. Ack a batch of only `initial_observation` events and arm again;
-  the watcher is armed only when a `wait` blocks.
+  baseline, possibly alongside pre-existing `revision` and `not_observed`
+  events; record any findings they contain before acking. Arm again after
+  acking — the watcher is armed only when a `wait` blocks.
 - An `events` batch means "inventory changed", not "a reviewer finished".
   `reviewer_completion` is always `unknown`; use the reviewer's own completion
   signal. `show` reads a review's stored body from the local store, so a
@@ -160,8 +161,6 @@ git-feedback wait <PR_URL> --consumer <WATCH_CONSUMER> --timeout 30m --skip-empt
   change the watcher would report.
 - Do not use the repo's `examples/watch-loop.sh` in agent loops. It acks on
   delivery, before anything handles the batch.
-- A new watch consumer's first `wait` returns immediately with the baseline.
-  Handle it like any batch.
 
 ## Store
 
