@@ -13,8 +13,9 @@ import (
 // TestWatchLoopScript: examples/watch-loop.sh hoists the shared options
 // into both wait and ack, acks the delivered events, and loops; argument
 // validation exits 2. The fake git-feedback sequences the wait responses
-// (events, timeout, then a sentinel and exit 42) so the loop terminates
-// deterministically.
+// (events with exit 3, timeout, then a sentinel and exit 42) so the loop
+// terminates deterministically. The status-driven events code that
+// --exit-on-events produces is an outcome, never a failure.
 func TestWatchLoopScript(t *testing.T) {
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skipf("jq not on PATH: %v", err)
@@ -101,6 +102,7 @@ func TestWatchLoopScript(t *testing.T) {
     n=$(grep -c '^wait ' "$LOG")
     if [ "$n" -eq 1 ]; then
       printf '{"status":"events","events":[{"id":"e1"},{"id":"e2"}]}\n'
+      exit 3
     elif [ "$n" -eq 2 ]; then
       printf '{"status":"timeout"}\n'
     else
@@ -204,6 +206,47 @@ esac
 		}
 		if len(waitIdx) != 1 {
 			t.Fatalf("wait invocations = %d, want 1 (the loop stopped after the failed ack; log: %q)", len(waitIdx), strings.Join(lines, " | "))
+		}
+	})
+
+	t.Run("status-driven exit codes", func(t *testing.T) {
+		// wait --exit-on-events reports events as exit 3 and head_changed as
+		// exit 4. Both are outcomes the loop re-arms from, not failures: a
+		// dropped code arm would exit the loop on a normal head move.
+		body := `case "$1" in
+  wait)
+    n=$(grep -c '^wait ' "$LOG")
+    if [ "$n" -eq 1 ]; then
+      printf '{"status":"events","events":[{"id":"e1"}]}\n'
+      exit 3
+    elif [ "$n" -eq 2 ]; then
+      printf '{"status":"head_changed","events":[]}\n'
+      exit 4
+    else
+      printf 'sentinel\n' >> "$LOG"
+      exit 42
+    fi
+    ;;
+  ack)
+    printf '{"status":"ok"}\n'
+    ;;
+esac
+`
+		run, logFile := installShim(t, body)
+		code, errb := run(testURL, "--consumer", consumer, "--state-dir", dir, "--account", "alice", "--exit-on-events")
+		if code != 42 {
+			t.Fatalf("script exit = %d, want 42: the loop must re-arm on exit 3 and exit 4 (stderr=%q)", code, errb)
+		}
+
+		lines, waitIdx, _ := readLog(t, logFile)
+		if len(waitIdx) != 3 {
+			t.Fatalf("wait invocations = %d, want 3 (log: %q)", len(waitIdx), strings.Join(lines, " | "))
+		}
+		if !strings.Contains(strings.Join(lines, "\n"), "sentinel") {
+			t.Fatalf("shim log missing the sentinel: the third wait never ran")
+		}
+		if !strings.Contains(lines[waitIdx[0]], "--exit-on-events") {
+			t.Fatalf("first wait %q missing %q", lines[waitIdx[0]], "--exit-on-events")
 		}
 	})
 

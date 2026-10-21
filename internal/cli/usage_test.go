@@ -26,6 +26,8 @@ func TestUsageContent(t *testing.T) {
 		"reconcile → wait → ack",
 		"issue URL (/issues/N)",
 		"--skip-head-changed, and",
+		"--exit-on-events",
+		"when it delivers events and 4 when a pinned head moved",
 		"acknowledges nothing",
 		`exactly one JSON envelope with a "status" field`,
 		"Operational errors exit 1, usage errors",

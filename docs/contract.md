@@ -35,8 +35,9 @@ Every subcommand writes exactly one JSON value to stdout. The one exception:
 }
 ```
 
-- `reconcile` returns `updated`, `unchanged`, `deferred`, `busy`, or `head_changed`. `snapshot`, `inbox`, `show`, `ack`, and `store path` return `ok`. `store reset` returns `updated` when store content was removed and `unchanged` otherwise. `wait` returns `events`, `timeout`, or `head_changed`; `head_changed` ends the wait when the consumer pinned a head that no longer matches the observed head. All of these exit 0.
+- `reconcile` returns `updated`, `unchanged`, `deferred`, `busy`, or `head_changed`. `snapshot`, `inbox`, `show`, `ack`, and `store path` return `ok`. `store reset` returns `updated` when store content was removed and `unchanged` otherwise. `wait` returns `events`, `timeout`, or `head_changed`; `head_changed` ends the wait when the consumer pinned a head that no longer matches the observed head. All of these exit 0, except for the opt-in `wait --exit-on-events` convention above.
 - `error` is `{"code": "", "message": "", "retryable": false}` with `status: "error"`. Operational errors exit 1; usage errors exit 2. Both still print the envelope.
+- Exit status by command and status, for `wait --exit-on-events`: `events` exits 3, `head_changed` exits 4, and `timeout`, every other status, and any `wait` without the flag exit 0. Errors and signals are unchanged (1, 2, 130, 143) and win over these codes. The envelope remains authoritative: the code only says which outcome ended the process.
 - `snapshot` may be null when no complete snapshot exists. `attempt` is nullable and reports the latest attempt separately from `snapshot.complete`. Deferred admission or failed refresh must never report a successful current attempt just because cached state exists.
 - `freshness.snapshot_observed_at` is the last successful complete observation for the returned snapshot, including unchanged collections. Set `stale` after the collection interval elapses or a subsequent refresh fails/drifts. Immutable snapshot collection timestamps remain unchanged.
 - `reviewer_completion` is always `"unknown"` in v1. `TestEnvelopeFields` asserts its presence on every command.
@@ -189,6 +190,14 @@ JSON result on events or deadline. The receiving harness calls `ack` separately.
   observed head; it carries no events.
 - After the harness receives the result, it calls `ack` separately with the event
   IDs it wants to record as delivered. `wait` itself acknowledges nothing.
+- Every `wait` status exits 0 by default. A monitor that signals on process
+  exit, and cannot read the envelope or filter stderr, passes
+  `--exit-on-events`: `events` then exits 3, `head_changed` exits 4, and
+  `timeout` stays 0, so the exit status alone separates "feedback landed" from
+  "the window expired". Errors (1, 2) and signals (130, 143) keep their codes
+  and win over it. Never pass the flag where any nonzero exit reads as a
+  failure — a poll-mode watcher, `set -e`, or CI — because a delivered batch is
+  a normal outcome.
 
 ### Monitor loop idiom
 
