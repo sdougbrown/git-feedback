@@ -23,6 +23,10 @@ data through the forge API
 (`gh pr view --json reviews,comments`, `gh api`) and keep the same
 triage-before-reply discipline by hand.
 
+One flag has a floor of its own: `wait --exit-on-events` needs 0.7.0 or later.
+On an older binary, leave it off and key on the envelope `status` instead —
+every other step in this skill works unchanged.
+
 Help exists at the top level (`git-feedback --help`) and on the `store`
 command (`git-feedback store --help`). Git intercepts `git feedback --help`,
 and `--help` on any other subcommand returns a usage error.
@@ -145,6 +149,14 @@ git-feedback wait <PR_URL> --consumer <WATCH_CONSUMER> --timeout 30m --skip-empt
 | `head_changed` | Only with `--head <SHA>`: the pinned head moved. Re-pin or drop the pin, re-arm. |
 | `error` | Report it. Do not re-arm on auth, not-found, or account-mismatch errors. |
 
+- **Read the outcome from the exit status when the harness cannot read the
+  envelope** (0.7.0+). Add `--exit-on-events` and `wait` exits 3 on `events`,
+  4 on `head_changed`, and 0 on `timeout`; errors keep 1 (operational) and 2
+  (usage), and signals keep 130/143. That is the whole signalling contract —
+  do not build a wrapper that greps the envelope to decide whether to notify.
+  The envelope stays authoritative for content, and the flag must not be used
+  where any nonzero exit reads as a failure (a poll-mode watcher, `set -e`,
+  CI): a delivered batch is a normal outcome, not a crash.
 - `--skip-head-changed` drops all `head_changed` events at delivery, so pushes
   — yours or a reviewer's — do not wake the watcher on head movement alone;
   feedback events always deliver. The events stay pending for a reader without

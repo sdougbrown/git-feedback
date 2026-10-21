@@ -59,7 +59,7 @@ git-feedback snapshot <URL> --snapshot <ID> --output <FILE> [--account <LOGIN>] 
 git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--exclude-self] [--skip-empty-reviews] [--json]
 git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--events-from -] [--account <LOGIN>] [--state-dir <DIR>] [--json]
 git-feedback show <URL> --event <ID> [--account <LOGIN>] [--state-dir <DIR>] [--json]
-git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--skip-empty-reviews] [--skip-head-changed] [--json]
+git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--skip-empty-reviews] [--skip-head-changed] [--exit-on-events] [--json]
 git-feedback store path [--state-dir <DIR>]
 git-feedback store reset [--target <URL>] [--state-dir <DIR>]
 ```
@@ -67,7 +67,8 @@ git-feedback store reset [--target <URL>] [--state-dir <DIR>]
 Every subcommand writes exactly one JSON envelope to stdout (see
 `docs/contract.md`). `--json` is accepted everywhere and is a no-op: output is
 always JSON. Operational errors exit 1 and usage errors exit 2; both still print
-the envelope.
+the envelope. `wait --exit-on-events` opts into status-driven codes for process
+monitors: `events` exits 3 and `head_changed` exits 4, while `timeout` stays 0.
 
 `<URL>` is a GitHub.com pull request URL (`/pull/N`) or issue URL
 (`/issues/N`); see "Issue targets" below.
@@ -250,7 +251,7 @@ correct, or a reviewer has finished.
 last attempt in `attempt`. It returns immediately on fatal errors (auth, not
 found, account mismatch, unsupported host). A pinned-head mismatch is not
 fatal: it returns `head_changed` with `expected_head` and `observed_head`, an
-empty `events` array, and exit 0. SIGINT
+empty `events` array, and exit 0 (exit 4 with `--exit-on-events`). SIGINT
 exits 130 and SIGTERM exits 143, with no stdout and no acknowledgements. There is
 no resident service; stopping the waiting process stops network work. When `wait`
 delivers or times out, it also writes a one-line status summary to stderr — for

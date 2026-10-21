@@ -466,3 +466,59 @@ func TestWaitStatusLineTimeout(t *testing.T) {
 		t.Errorf("stderr = %q, want it to contain %q", res.Stderr, want)
 	}
 }
+
+// TestWaitExitOnEvents: opt-in status-driven exit codes let a monitor that
+// only observes process exit separate a delivered batch from the deadline
+// expiry. Events exit 3, timeout stays 0, and the envelope is unchanged
+// either way.
+func TestWaitExitOnEvents(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, map[string]string{"GIT_FEEDBACK_MIN_INTERVAL": "100ms"})
+	dir := testState(t)
+	_, tagged := binPaths(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	// Cold start: the baseline is delivered, so the wait ends on events.
+	res := runCLI(ctx, t, tagged, env, waitArgs(dir, "--exit-on-events", "--timeout", "60s")...)
+	if res.Code != 3 {
+		t.Fatalf("exit = %d, want 3 for events (stdout=%s stderr=%q)", res.Code, res.Stdout, res.Stderr)
+	}
+	if s := statusOf(t, res.Env); s != "events" {
+		t.Fatalf("wait status = %q, want events", s)
+	}
+	if len(eventKinds(t, res.Env)) == 0 {
+		t.Fatalf("wait delivered no events")
+	}
+
+	// Nothing pending: the deadline expires and the code stays 0.
+	ackAll(t, env, dir)
+	res = runCLI(ctx, t, tagged, env, waitArgs(dir, "--exit-on-events", "--timeout", "5s")...)
+	if res.Code != 0 {
+		t.Fatalf("exit = %d, want 0 for timeout (stderr=%q)", res.Code, res.Stderr)
+	}
+	if s := statusOf(t, res.Env); s != "timeout" {
+		t.Fatalf("wait status = %q, want timeout", s)
+	}
+}
+
+// TestWaitExitOnEventsHeadChanged: a moved pinned head is its own outcome.
+// --exit-on-events reports it on exit status separately from delivered events.
+func TestWaitExitOnEventsHeadChanged(t *testing.T) {
+	stub := newStub(t)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, map[string]string{"GIT_FEEDBACK_MIN_INTERVAL": "100ms"})
+	dir := testState(t)
+	seedPublished(t, env, dir)
+	ackAll(t, env, dir)
+
+	_, tagged := binPaths(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	res := runCLI(ctx, t, tagged, env, waitArgs(dir, "--exit-on-events", "--head", "deadbeef", "--timeout", "10s")...)
+	if res.Code != 4 {
+		t.Fatalf("exit = %d, want 4 for head_changed (stdout=%s stderr=%q)", res.Code, res.Stdout, res.Stderr)
+	}
+	if s := statusOf(t, res.Env); s != "head_changed" {
+		t.Fatalf("wait status = %q, want head_changed", s)
+	}
+}

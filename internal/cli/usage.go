@@ -12,7 +12,7 @@ Usage:
   git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--exclude-self] [--skip-empty-reviews] [--json]
   git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--events-from -] [--account <LOGIN>] [--state-dir <DIR>] [--json]
   git-feedback show <URL> --event <ID> [--account <LOGIN>] [--state-dir <DIR>] [--json]
-  git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--skip-empty-reviews] [--skip-head-changed] [--json]
+  git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--skip-empty-reviews] [--skip-head-changed] [--exit-on-events] [--json]
   git-feedback store path [--state-dir <DIR>]
   git-feedback store reset [--target <URL>] [--state-dir <DIR>]
 
@@ -41,7 +41,10 @@ Contract:
   Every subcommand writes exactly one JSON envelope with a "status" field to
   stdout; diagnostics go to stderr. Operational errors exit 1, usage errors
   exit 2. Registry and harness callers should key on "status", not the exit
-  code. Full machine contract: docs/contract.md.
+  code. The one exception is opt-in and wait-only: --exit-on-events exits 3
+  when it delivers events and 4 when a pinned head moved, so a process
+  monitor reads the outcome from the exit status alone. timeout stays 0.
+  Full machine contract: docs/contract.md.
 
 Flags:
   --version    print version and exit

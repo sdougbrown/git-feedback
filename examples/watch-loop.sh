@@ -17,7 +17,10 @@
 # closes it — each iteration runs one bounded `wait`, prints the delivered
 # envelope to stdout (the acking side must surface the batch), acknowledges
 # the delivered event IDs, and loops. `status: "timeout"` is a normal
-# outcome and simply starts the next iteration.
+# outcome and simply starts the next iteration. Wait flags reach wait
+# unchanged, including --exit-on-events: the wrapper reads the outcome from the
+# envelope, so the status-driven exit codes (events 3, head_changed 4) are
+# treated as outcomes too, not as failures.
 #
 # Requires: git-feedback on PATH, jq.
 set -euo pipefail
@@ -87,12 +90,19 @@ SHARED=()
 while true; do
   rc=0
   out=$(git-feedback wait "$URL" --consumer "$CONSUMER" "${SHARED[@]+${SHARED[@]}}" "${FLAGS[@]+${FLAGS[@]}}" --json) || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    # Operational/usage failure: surface the envelope and stop the loop.
-    # A signal kill produces no envelope; don't print a stray blank line.
-    [ -n "$out" ] && printf '%s\n' "$out" >&2
-    exit "$rc"
-  fi
+  case "$rc" in
+    0) ;; # timeout, or any status the wrapper re-arms on
+    3|4)
+      # events / head_changed under wait --exit-on-events. Normal outcomes:
+      # the envelope below decides what to do.
+      ;;
+    *)
+      # Operational/usage failure: surface the envelope and stop the loop.
+      # A signal kill produces no envelope; don't print a stray blank line.
+      [ -n "$out" ] && printf '%s\n' "$out" >&2
+      exit "$rc"
+      ;;
+  esac
   status=$(printf '%s' "$out" | jq -r '.status')
 
   if [ "$status" = "events" ]; then

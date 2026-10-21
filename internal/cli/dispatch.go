@@ -97,7 +97,7 @@ var specs = map[string]commandSpec{
 		handle: handleShow,
 	},
 	"wait": {
-		flags:  []flagSpec{{"consumer", flagString}, {"timeout", flagString}, {"head", flagString}, {"limit", flagString}, {"exclude-self", flagBool}, {"skip-empty-reviews", flagBool}, {"skip-head-changed", flagBool}},
+		flags:  []flagSpec{{"consumer", flagString}, {"timeout", flagString}, {"head", flagString}, {"limit", flagString}, {"exclude-self", flagBool}, {"skip-empty-reviews", flagBool}, {"skip-head-changed", flagBool}, {"exit-on-events", flagBool}},
 		handle: handleWait,
 	},
 	"store": {
@@ -308,6 +308,17 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 			return ExitUsage
 		}
 		return ExitOperational
+	}
+	// Opt-in status-driven codes: a monitor that signals on process exit
+	// separates delivered events from the deadline expiry without parsing
+	// stderr or the envelope. Errors and signals above keep their own codes.
+	if inv.Command == "wait" && inv.Bools["exit-on-events"] {
+		switch result.Status {
+		case StatusEvents:
+			return ExitEvents
+		case StatusHeadChange:
+			return ExitHeadChanged
+		}
 	}
 	return ExitOK
 }
