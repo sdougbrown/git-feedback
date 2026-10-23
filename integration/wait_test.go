@@ -451,6 +451,25 @@ func TestWaitIncludeSelf(t *testing.T) {
 	if len(authors) != 3 {
 		t.Fatalf("events = %d, want 3 (target + own + rev)", len(authors))
 	}
+
+	// Both spellings together: --include-self wins and own objects deliver.
+	envOut = runOK(t, env, 30*time.Second, waitArgs(dir, "--timeout", "5s", "--exclude-self", "--include-self")...)
+	if s := statusOf(t, envOut); s != "events" {
+		t.Fatalf("wait status = %q, want events", s)
+	}
+	authors = eventAuthors(t, envOut)
+	hasOwn = false
+	for _, a := range authors {
+		if a == "alice" {
+			hasOwn = true
+		}
+	}
+	if !hasOwn {
+		t.Fatalf("--include-self must win over --exclude-self (authors: %v)", authors)
+	}
+	if len(authors) != 3 {
+		t.Fatalf("events = %d, want 3 (target + own + rev)", len(authors))
+	}
 }
 
 // TestWaitStatusLineTimeout: the stderr status summary reflects the timeout

@@ -537,6 +537,17 @@ func TestInboxIncludeSelf(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("--include-self wins over --exclude-self", func(t *testing.T) {
+		code, env, _ := runCLI(t, []string{"inbox", "--consumer", "ci", "--exclude-self", "--include-self", "--state-dir", dir, handlerURL})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertContract(t, env)
+		if n := len(env["events"].([]any)); n != 7 {
+			t.Fatalf("events = %d, want 7 (target + all objects)", n)
+		}
+	})
 }
 
 // TestIssueTargetLocalSurface: an issue URL resolves to a target whose
