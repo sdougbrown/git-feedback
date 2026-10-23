@@ -44,10 +44,11 @@ type WaitInput struct {
 	Consumer string
 	// Limit bounds the delivered page (0 uses the store default).
 	Limit int
-	// ExcludeSelf, when false (the default), filters out events whose author
-	// equals the stream's own account from delivery. When true, all events
-	// are delivered. The filter follows the account known at each cycle.
-	ExcludeSelf bool
+	// IncludeSelf, when true, delivers events whose author equals the
+	// stream's own account. Off by default, so own-authored events are
+	// filtered from delivery. The filter follows the account known at each
+	// cycle.
+	IncludeSelf bool
 	// SkipEmptyReviews, when true, filters out review events whose review is
 	// an empty COMMENTED container (GitHub's inline-reply containers). The
 	// store classifies emptiness from the event's snapshot body at delivery.
@@ -284,7 +285,7 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 	// The self filter always applies for the cycle's known account (the
 	// only case where backlog runs).
 	excludeAuthor := ""
-	if !in.ExcludeSelf {
+	if !in.IncludeSelf {
 		excludeAuthor = forge.CanonicalAccount(account)
 	}
 	page, err := eng.Store.Inbox(ctx, store.InboxInput{

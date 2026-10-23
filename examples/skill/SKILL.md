@@ -45,7 +45,8 @@ and `--help` on any other subcommand returns a usage error.
 - **Key on `status`, not the exit code.** Every subcommand prints one JSON
   envelope.
 - **Self-filter is on by default.** Your own comments, reviews, and replies are
-  not delivered. `--exclude-self` turns the filter *off* (delivers everything).
+  not delivered. `--include-self` turns the filter *off* (delivers everything);
+  the legacy `--exclude-self` spelling is accepted as a no-op.
   Your own thread resolutions still arrive as a `revision:thread` authored by
   the reviewer.
 - Pass `--skip-empty-reviews` to `inbox` and `wait`. GitHub creates an empty

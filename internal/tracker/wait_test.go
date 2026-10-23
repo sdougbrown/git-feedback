@@ -237,10 +237,10 @@ func TestWaitTimeoutAtDeadlineAcrossDeferredCycles(t *testing.T) {
 	}
 }
 
-// TestWaitExcludeSelf filters out events whose author equals the stream's
-// own account by default; ExcludeSelf restores them. The backlog is
+// TestWaitIncludeSelf filters out events whose author equals the stream's
+// own account by default; IncludeSelf restores them. The backlog is
 // delivered without running a cycle, so no bootstrap lease is needed.
-func TestWaitExcludeSelf(t *testing.T) {
+func TestWaitIncludeSelf(t *testing.T) {
 	e := newEnvAt(t, baseTime)
 
 	// Publish a backlog where alice (the stream's account) authors one
@@ -287,10 +287,10 @@ func TestWaitExcludeSelf(t *testing.T) {
 		}
 	})
 
-	t.Run("ExcludeSelf delivers everything", func(t *testing.T) {
+	t.Run("IncludeSelf delivers everything", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		res, err := runWait(t, e, WaitInput{URL: testURL, Consumer: "watcher", ExcludeSelf: true}, ctx, 5*time.Second)
+		res, err := runWait(t, e, WaitInput{URL: testURL, Consumer: "watcher", IncludeSelf: true}, ctx, 5*time.Second)
 		if err != nil {
 			t.Fatalf("wait: %v", err)
 		}

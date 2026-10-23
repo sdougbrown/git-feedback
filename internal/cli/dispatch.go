@@ -85,7 +85,7 @@ var specs = map[string]commandSpec{
 		handle: handleSnapshot,
 	},
 	"inbox": {
-		flags:  []flagSpec{{"consumer", flagString}, {"limit", flagString}, {"after", flagString}, {"ids-only", flagBool}, {"exclude-self", flagBool}, {"skip-empty-reviews", flagBool}},
+		flags:  []flagSpec{{"consumer", flagString}, {"limit", flagString}, {"after", flagString}, {"ids-only", flagBool}, {"include-self", flagBool}, {"exclude-self", flagBool}, {"skip-empty-reviews", flagBool}}, // exclude-self is a legacy no-op; exclusion is the default.
 		handle: handleInbox,
 	},
 	"ack": {
@@ -97,7 +97,7 @@ var specs = map[string]commandSpec{
 		handle: handleShow,
 	},
 	"wait": {
-		flags:  []flagSpec{{"consumer", flagString}, {"timeout", flagString}, {"head", flagString}, {"limit", flagString}, {"exclude-self", flagBool}, {"skip-empty-reviews", flagBool}, {"skip-head-changed", flagBool}, {"exit-on-events", flagBool}},
+		flags:  []flagSpec{{"consumer", flagString}, {"timeout", flagString}, {"head", flagString}, {"limit", flagString}, {"include-self", flagBool}, {"exclude-self", flagBool}, {"skip-empty-reviews", flagBool}, {"skip-head-changed", flagBool}, {"exit-on-events", flagBool}}, // exclude-self is a legacy no-op; exclusion is the default.
 		handle: handleWait,
 	},
 	"store": {

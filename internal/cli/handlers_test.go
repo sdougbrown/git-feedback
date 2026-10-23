@@ -473,10 +473,11 @@ func TestInboxIDsOnly(t *testing.T) {
 	}
 }
 
-// TestInboxExcludeSelf: default delivery excludes the stream's own account's
-// self-authored objects; --exclude-self restores them. The contract holds in
+// TestInboxIncludeSelf: default delivery excludes the stream's own account's
+// self-authored objects; --include-self restores them, while the legacy
+// --exclude-self spelling stays accepted as a no-op. The contract holds in
 // both.
-func TestInboxExcludeSelf(t *testing.T) {
+func TestInboxIncludeSelf(t *testing.T) {
 	dir, st, _ := handlerEnv(t)
 	publishMixedHandler(t, st, "alice")
 
@@ -498,8 +499,8 @@ func TestInboxExcludeSelf(t *testing.T) {
 		}
 	})
 
-	t.Run("--exclude-self restores own objects", func(t *testing.T) {
-		code, env, _ := runCLI(t, []string{"inbox", "--consumer", "ci", "--exclude-self", "--state-dir", dir, handlerURL})
+	t.Run("--include-self restores own objects", func(t *testing.T) {
+		code, env, _ := runCLI(t, []string{"inbox", "--consumer", "ci", "--include-self", "--state-dir", dir, handlerURL})
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
 		}
@@ -516,7 +517,24 @@ func TestInboxExcludeSelf(t *testing.T) {
 			}
 		}
 		if !hasOwn {
-			t.Error("--exclude-self did not restore the account's own objects")
+			t.Error("--include-self did not restore the account's own objects")
+		}
+	})
+
+	t.Run("--exclude-self is an accepted no-op", func(t *testing.T) {
+		code, env, _ := runCLI(t, []string{"inbox", "--consumer", "ci", "--exclude-self", "--state-dir", dir, handlerURL})
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
+		}
+		assertContract(t, env)
+		events := env["events"].([]any)
+		if len(events) != 4 {
+			t.Fatalf("events = %d, want 4 (same as the default)", len(events))
+		}
+		for _, e := range events {
+			if a, ok := e.(map[string]any)["author"].(string); ok && a == "alice" {
+				t.Errorf("event has author alice; --exclude-self must not opt in")
+			}
 		}
 	})
 }
@@ -581,8 +599,8 @@ func TestIssueTargetLocalSurface(t *testing.T) {
 		t.Errorf("comment event = %v", last)
 	}
 
-	t.Run("--exclude-self delivers own comments", func(t *testing.T) {
-		code, env, _ := runCLI(t, []string{"inbox", "--consumer", "self", "--exclude-self", "--state-dir", dir, issueURL})
+	t.Run("--include-self delivers own comments", func(t *testing.T) {
+		code, env, _ := runCLI(t, []string{"inbox", "--consumer", "self", "--include-self", "--state-dir", dir, issueURL})
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
 		}

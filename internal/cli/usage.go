@@ -9,10 +9,10 @@ const Usage = `git-feedback observes GitHub review feedback and delivers replaya
 Usage:
   git-feedback reconcile <URL> [--head <SHA>] [--account <LOGIN>] [--state-dir <DIR>] [--json]
   git-feedback snapshot <URL> --snapshot <ID> --output <FILE> [--account <LOGIN>] [--state-dir <DIR>] [--json]
-  git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--exclude-self] [--skip-empty-reviews] [--json]
+  git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--include-self] [--skip-empty-reviews] [--json]
   git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--events-from -] [--account <LOGIN>] [--state-dir <DIR>] [--json]
   git-feedback show <URL> --event <ID> [--account <LOGIN>] [--state-dir <DIR>] [--json]
-  git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--skip-empty-reviews] [--skip-head-changed] [--exit-on-events] [--json]
+  git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--include-self] [--skip-empty-reviews] [--skip-head-changed] [--exit-on-events] [--json]
   git-feedback store path [--state-dir <DIR>]
   git-feedback store reset [--target <URL>] [--state-dir <DIR>]
 
@@ -49,6 +49,10 @@ Contract:
 Flags:
   --version    print version and exit
   --help       show this help
+
+  inbox and wait exclude events authored by the stream's own account by
+  default. --include-self opts back in; the legacy --exclude-self spelling is
+  accepted as a no-op.
 `
 
 // StoreUsage is the help text printed for `store --help`. The store is a

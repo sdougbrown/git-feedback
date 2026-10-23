@@ -44,7 +44,7 @@ func handleWait(ctx context.Context, inv Invocation) (Result, error) {
 		Account:          inv.Flags["account"],
 		Consumer:         consumer,
 		Limit:            limit,
-		ExcludeSelf:      inv.Bools["exclude-self"],
+		IncludeSelf:      inv.Bools["include-self"],
 		SkipEmptyReviews: inv.Bools["skip-empty-reviews"],
 		SkipHeadChanged:  inv.Bools["skip-head-changed"],
 	})
