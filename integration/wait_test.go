@@ -388,12 +388,13 @@ func TestWaitHonorsPersistedRateGate(t *testing.T) {
 	}
 }
 
-// TestWaitExcludeSelf: default wait delivery excludes the stream's own
-// account's self-authored objects; --exclude-self restores them. The
-// backlog is delivered without running a cycle, so no bootstrap lease is
-// needed. Reading never acknowledges, so the second run (with the flag)
-// sees the full unfiltered backlog — the designed behavior.
-func TestWaitExcludeSelf(t *testing.T) {
+// TestWaitIncludeSelf: default wait delivery excludes the stream's own
+// account's self-authored objects; --include-self restores them and the
+// legacy --exclude-self spelling is an accepted no-op. The backlog is
+// delivered without running a cycle, so no bootstrap lease is needed.
+// Reading never acknowledges, so each run sees the full backlog — the
+// designed behavior.
+func TestWaitIncludeSelf(t *testing.T) {
 	stub := newStub(t)
 	env := testEnv(fakeGHPath(t), stub.srv.URL, nil)
 	dir := testState(t)
@@ -415,9 +416,25 @@ func TestWaitExcludeSelf(t *testing.T) {
 		t.Fatalf("events = %d, want 2 (target + rev comment)", len(authors))
 	}
 
-	// --exclude-self: the account's own objects are restored. Reading never
-	// acknowledges, so the same consumer sees the full unfiltered backlog.
+	// --exclude-self: legacy spelling, now a no-op, so the own objects stay
+	// filtered and the delivery matches the default.
 	envOut = runOK(t, env, 30*time.Second, waitArgs(dir, "--timeout", "5s", "--exclude-self")...)
+	if s := statusOf(t, envOut); s != "events" {
+		t.Fatalf("wait status = %q, want events", s)
+	}
+	authors = eventAuthors(t, envOut)
+	for _, a := range authors {
+		if a == "alice" {
+			t.Fatalf("--exclude-self must not opt in (authors: %v)", authors)
+		}
+	}
+	if len(authors) != 2 {
+		t.Fatalf("events = %d, want 2 (same as the default)", len(authors))
+	}
+
+	// --include-self: the account's own objects are restored. Reading never
+	// acknowledges, so the same consumer sees the full unfiltered backlog.
+	envOut = runOK(t, env, 30*time.Second, waitArgs(dir, "--timeout", "5s", "--include-self")...)
 	if s := statusOf(t, envOut); s != "events" {
 		t.Fatalf("wait status = %q, want events", s)
 	}
@@ -429,7 +446,26 @@ func TestWaitExcludeSelf(t *testing.T) {
 		}
 	}
 	if !hasOwn {
-		t.Fatalf("--exclude-self did not restore the account's own objects (authors: %v)", authors)
+		t.Fatalf("--include-self did not restore the account's own objects (authors: %v)", authors)
+	}
+	if len(authors) != 3 {
+		t.Fatalf("events = %d, want 3 (target + own + rev)", len(authors))
+	}
+
+	// Both spellings together: --include-self wins and own objects deliver.
+	envOut = runOK(t, env, 30*time.Second, waitArgs(dir, "--timeout", "5s", "--exclude-self", "--include-self")...)
+	if s := statusOf(t, envOut); s != "events" {
+		t.Fatalf("wait status = %q, want events", s)
+	}
+	authors = eventAuthors(t, envOut)
+	hasOwn = false
+	for _, a := range authors {
+		if a == "alice" {
+			hasOwn = true
+		}
+	}
+	if !hasOwn {
+		t.Fatalf("--include-self must win over --exclude-self (authors: %v)", authors)
 	}
 	if len(authors) != 3 {
 		t.Fatalf("events = %d, want 3 (target + own + rev)", len(authors))

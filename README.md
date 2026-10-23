@@ -56,10 +56,10 @@ intercepts `git feedback --help` before it reaches the tool).
 ```
 git-feedback reconcile <URL> [--head <SHA>] [--account <LOGIN>] [--state-dir <DIR>] [--json]
 git-feedback snapshot <URL> --snapshot <ID> --output <FILE> [--account <LOGIN>] [--state-dir <DIR>] [--json]
-git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--exclude-self] [--skip-empty-reviews] [--json]
+git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--limit 50] [--after <CURSOR>] [--ids-only] [--include-self] [--skip-empty-reviews] [--json]
 git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--events-from -] [--account <LOGIN>] [--state-dir <DIR>] [--json]
 git-feedback show <URL> --event <ID> [--account <LOGIN>] [--state-dir <DIR>] [--json]
-git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--exclude-self] [--skip-empty-reviews] [--skip-head-changed] [--exit-on-events] [--json]
+git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--include-self] [--skip-empty-reviews] [--skip-head-changed] [--exit-on-events] [--json]
 git-feedback store path [--state-dir <DIR>]
 git-feedback store reset [--target <URL>] [--state-dir <DIR>]
 ```
@@ -126,8 +126,10 @@ reset --target` — works the same way.
   to filter — so they are ignored rather than rejected. One command shape then
   works across a set of targets that mixes pull requests and issues, and the
   envelope shows the pin did not apply: `expected_head` stays `null`.
-- **`--exclude-self` matters most.** Each agent posts as its human's account,
+- **The self filter matters most.** Each agent posts as its human's account,
   so the default self filter is what stops it waking on its own comments.
+  `--include-self` opts back in; the legacy `--exclude-self` spelling is
+  accepted as a no-op.
 - **`/issues/N` on a pull request number stays an issue target.** The URL
   decides the kind; such a target collects comments only. Use the
   `/pull/N` URL for full pull request collection (the number, and therefore
@@ -203,8 +205,11 @@ parsing the full envelope.
 
 `inbox` and `wait` filter out events whose object author is the stream's own
 account by default, so the account's own comments, reviews, and replies do not
-compound the delivery. `--exclude-self` opts back in and delivers everything.
-Author-less and legacy events (no author) are always delivered, and the store and
+compound the delivery. `--include-self` opts back in and delivers everything;
+`--exclude-self` is accepted as a no-op for compatibility, because exclusion is
+already the default, and prints a one-line deprecation notice on stderr.
+Author-less and legacy events (no author) are always
+delivered, and the store and
 snapshot retention are unchanged — the filter applies only at delivery. Thread
 revisions are attributed to the authors of what changed: when every added or
 changed comment in the window is the account's own and nothing else changed but
