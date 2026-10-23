@@ -207,7 +207,8 @@ parsing the full envelope.
 account by default, so the account's own comments, reviews, and replies do not
 compound the delivery. `--include-self` opts back in and delivers everything;
 `--exclude-self` is accepted as a no-op for compatibility, because exclusion is
-already the default. Author-less and legacy events (no author) are always
+already the default, and prints a one-line deprecation notice on stderr.
+Author-less and legacy events (no author) are always
 delivered, and the store and
 snapshot retention are unchanged — the filter applies only at delivery. Thread
 revisions are attributed to the authors of what changed: when every added or

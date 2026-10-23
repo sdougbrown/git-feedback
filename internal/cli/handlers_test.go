@@ -522,11 +522,14 @@ func TestInboxIncludeSelf(t *testing.T) {
 	})
 
 	t.Run("--exclude-self is an accepted no-op", func(t *testing.T) {
-		code, env, _ := runCLI(t, []string{"inbox", "--consumer", "ci", "--exclude-self", "--state-dir", dir, handlerURL})
+		code, env, _, stderr := runCLIStd(t, []string{"inbox", "--consumer", "ci", "--exclude-self", "--state-dir", dir, handlerURL})
 		if code != 0 {
 			t.Fatalf("exit = %d, want 0 (%v)", code, env["error"])
 		}
 		assertContract(t, env)
+		if !strings.Contains(stderr, "--exclude-self is deprecated") {
+			t.Errorf("stderr = %q, want the deprecation notice", stderr)
+		}
 		events := env["events"].([]any)
 		if len(events) != 4 {
 			t.Fatalf("events = %d, want 4 (same as the default)", len(events))

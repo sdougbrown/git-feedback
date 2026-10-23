@@ -228,6 +228,9 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err.Error())
 		return ExitUsage
 	}
+	if inv.Bools["exclude-self"] {
+		fmt.Fprintln(stderr, "--exclude-self is deprecated and is a no-op; use --include-self to deliver your own events")
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

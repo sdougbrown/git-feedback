@@ -52,7 +52,7 @@ Flags:
 
   inbox and wait exclude events authored by the stream's own account by
   default. --include-self opts back in; the legacy --exclude-self spelling is
-  accepted as a no-op.
+  accepted as a no-op and reports a deprecation notice on stderr.
 `
 
 // StoreUsage is the help text printed for `store --help`. The store is a
