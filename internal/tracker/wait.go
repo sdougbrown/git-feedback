@@ -284,16 +284,12 @@ func wakeTime(res Result, rerr error, cycleCut bool, eng *Engine) time.Time {
 func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, account string, in WaitInput) (WaitResult, bool, error) {
 	// The self filter always applies for the cycle's known account (the
 	// only case where backlog runs).
-	excludeAuthor := ""
-	if !in.IncludeSelf {
-		excludeAuthor = forge.CanonicalAccount(account)
-	}
 	page, err := eng.Store.Inbox(ctx, store.InboxInput{
 		TargetID:         target.ID,
 		Account:          account,
 		Consumer:         in.Consumer,
 		Limit:            in.Limit,
-		ExcludeAuthor:    excludeAuthor,
+		ExcludeAuthor:    store.SelfExclusionAuthor(account, in.IncludeSelf),
 		SkipEmptyReviews: in.SkipEmptyReviews,
 		SkipHeadChanged:  in.SkipHeadChanged,
 	})

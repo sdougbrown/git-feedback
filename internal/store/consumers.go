@@ -48,6 +48,16 @@ type InboxInput struct {
 	SkipHeadChanged bool
 }
 
+// SelfExclusionAuthor returns the canonical author to filter from delivery for
+// a stream's account. Consumers that opted into their own events get an empty
+// author, which disables the filter.
+func SelfExclusionAuthor(account string, includeSelf bool) string {
+	if includeSelf {
+		return ""
+	}
+	return forge.CanonicalAccount(account)
+}
+
 // emptyReview reports whether a review is a content-free COMMENTED container:
 // GitHub's inline-reply containers carry state COMMENTED and no body. A
 // non-COMMENTED state is itself content (a decision), so it never counts as
