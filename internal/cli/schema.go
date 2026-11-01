@@ -10,10 +10,10 @@ import (
 
 // SchemaDoc is the machine-readable interface contract printed by the
 // schema command. Every agent- or harness-facing fact about the CLI lives
-// here as data: the command and flag surface (derived from the same specs
-// table the help renders from), the envelope shape, the statuses each
-// command can report, and the exit-code convention. docs/contract.md
-// remains the prose reference; this document is the parseable one.
+// here as data. The command and flag surface derives from the same specs
+// table the help renders from; the envelope shape, statuses, and exit-code
+// convention are declared facts. docs/contract.md remains the prose
+// reference; this document is the parseable one.
 type SchemaDoc struct {
 	Schema      string                   `json:"schema"`
 	CliVersion  string                   `json:"cli_version"`
@@ -46,9 +46,10 @@ type FlagSchema struct {
 }
 
 // EnvelopeSchema describes the result envelope: its schema id, the ordered
-// field list every command emits, the statuses each command can report, the
-// universal status every command can report on failure, the error codes,
-// and where the prose contract lives.
+// field list every command emits, and the statuses each command can report.
+// UniversalStatuses names the status every command reports on failure;
+// ErrorCodes names the stable error codes. Documentation points at the
+// prose contract.
 type EnvelopeSchema struct {
 	Schema            string              `json:"schema"`
 	Fields            []string            `json:"fields"`
@@ -58,9 +59,9 @@ type EnvelopeSchema struct {
 	Documentation     string              `json:"documentation"`
 }
 
-// flagDefault carries documented effective defaults the flags' zero values
-// do not express: the flag value is a string, but the handler treats it as
-// the documented default when absent.
+// flagDefault carries documented effective defaults. The flag value is a
+// string and its zero value is empty, but the handler treats the documented
+// default as the value when the flag is absent.
 var flagDefault = map[string]string{
 	"inbox.limit":  "50",
 	"wait.limit":   "50",
@@ -98,9 +99,9 @@ func flagsSchema(name string, flags []flagSpec) map[string]FlagSchema {
 }
 
 // buildSchema derives the interface contract. Command and flag data come
-// from the specs table and the help metadata; the envelope shape, statuses,
-// and exit codes are declared here because they are contract facts that
-// tests pin independently.
+// from the specs table and the help metadata. The envelope shape, statuses,
+// and exit codes are declared here. They are contract facts that tests pin
+// independently.
 func buildSchema() *SchemaDoc {
 	doc := &SchemaDoc{
 		Schema:      "git-feedback/cli-schema/v1",
