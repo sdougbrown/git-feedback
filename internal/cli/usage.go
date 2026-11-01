@@ -79,6 +79,7 @@ var flagUsage = map[string]string{
 	"exclude-self":       "deprecated no-op; self-authored events are already excluded",
 	"event":              "event ID to acknowledge; repeat the flag for multiple IDs",
 	"events-from":        "read event IDs from a file, or - for stdin",
+	"show.event":         "event ID to display",
 	"timeout":            "maximum wait duration (default 30m)",
 	"skip-empty-reviews": "skip review events whose review body and comments are empty",
 	"skip-head-changed":  "suppress head_changed events and keep waiting",

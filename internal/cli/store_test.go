@@ -410,6 +410,7 @@ func TestStoreUsageErrors(t *testing.T) {
 		{"stray positional", []string{"store", "path", "https://github.com/o/r/pull/1"}},
 		{"reset stray positional", []string{"store", "reset", "https://github.com/o/r/pull/1"}},
 		{"bad target URL", []string{"store", "reset", "--target", "not-a-url", "--state-dir", dir}},
+		{"target on path", []string{"store", "path", "--target", "https://github.com/o/r/pull/1"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

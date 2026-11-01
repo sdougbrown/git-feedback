@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -137,17 +138,23 @@ func asUsageError(err error) error {
 	return &usageError{err.Error()}
 }
 
-// addSpecFlags registers one spec's flags on a flag set, with the generated
-// usage strings.
-func addSpecFlags(fs *pflag.FlagSet, flags []flagSpec) {
+// addSpecFlags registers one spec's flags on a flag set with the generated
+// usage strings. A command-scoped "<command>.<flag>" entry wins over the
+// plain flag name, so one flag can document differently per command
+// (ack's repeatable --event vs show's single --event).
+func addSpecFlags(fs *pflag.FlagSet, name string, flags []flagSpec) {
 	for _, f := range flags {
+		usage, ok := flagUsage[name+"."+f.name]
+		if !ok {
+			usage = flagUsage[f.name]
+		}
 		switch f.kind {
 		case flagBool:
-			fs.Bool(f.name, false, flagUsage[f.name])
+			fs.Bool(f.name, false, usage)
 		case flagRepeat:
-			fs.StringArray(f.name, nil, flagUsage[f.name])
+			fs.StringArray(f.name, nil, usage)
 		default:
-			fs.String(f.name, "", flagUsage[f.name])
+			fs.String(f.name, "", usage)
 		}
 	}
 }
@@ -258,7 +265,7 @@ func deprecationNotice(inv Invocation, stderr io.Writer) {
 
 // dispatchRunE builds the RunE shared by every dispatching command: capture
 // the Invocation, and in dispatch mode run the handler and record the result.
-func dispatchRunE(exec *execution, runHandlers bool, name, sub string, urlCommand bool) func(*cobra.Command, []string) error {
+func dispatchRunE(exec *execution, runHandlers bool, name, sub string) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		inv, err := invocationFrom(cmd, name, sub, args)
 		if err != nil {
@@ -316,7 +323,22 @@ func newRootCommand(exec *execution, runHandlers bool) *cobra.Command {
 	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return &usageError{fmt.Sprintf("%s: %v", cmd.Name(), err)}
 	})
-	addSpecFlags(root.PersistentFlags(), commonFlags)
+	// The default help command reports unknown topics on stdout and exits 0,
+	// breaching the one-JSON-envelope contract; this replacement routes
+	// unknown help topics to the usage envelope instead.
+	root.SetHelpCommand(&cobra.Command{
+		Use:   "help [command]",
+		Short: "Help about any command",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, _, err := root.Find(args)
+			if err != nil || (len(args) > 0 && target == root) {
+				return &usageError{fmt.Sprintf("unknown help topic %q", strings.Join(args, " "))}
+			}
+			target.InitDefaultHelpFlag()
+			return target.Help()
+		},
+	})
+	addSpecFlags(root.PersistentFlags(), "", commonFlags)
 
 	for name, spec := range specs {
 		if name == "store" {
@@ -327,9 +349,9 @@ func newRootCommand(exec *execution, runHandlers bool) *cobra.Command {
 			Use:   name + " <URL>",
 			Short: commandShort[name],
 			Args:  exactlyOneURL(name),
-			RunE:  dispatchRunE(exec, runHandlers, name, "", true),
+			RunE:  dispatchRunE(exec, runHandlers, name, ""),
 		}
-		addSpecFlags(cmd.Flags(), spec.flags)
+		addSpecFlags(cmd.Flags(), name, spec.flags)
 		root.AddCommand(cmd)
 	}
 	return root
@@ -351,15 +373,15 @@ func newStoreCommand(exec *execution, runHandlers bool, spec commandSpec) *cobra
 		Use:   "path",
 		Short: storeSubShort["path"],
 		Args:  noArgs("store path"),
-		RunE:  dispatchRunE(exec, runHandlers, "store", "path", false),
+		RunE:  dispatchRunE(exec, runHandlers, "store", "path"),
 	}
 	reset := &cobra.Command{
 		Use:   "reset",
 		Short: storeSubShort["reset"],
 		Args:  noArgs("store reset"),
-		RunE:  dispatchRunE(exec, runHandlers, "store", "reset", false),
+		RunE:  dispatchRunE(exec, runHandlers, "store", "reset"),
 	}
-	addSpecFlags(reset.Flags(), spec.flags)
+	addSpecFlags(reset.Flags(), "store", spec.flags)
 	store.AddCommand(path, reset)
 	return store
 }
@@ -383,6 +405,11 @@ func parseInvocation(argv []string) (Invocation, error) {
 	root.SetArgs(argv)
 	if err := root.Execute(); err != nil {
 		return Invocation{}, asUsageError(err)
+	}
+	if !exec.ran {
+		// Help paths (bare --help, the help command) dispatch nothing; a
+		// parse-only caller asking for an Invocation is a caller error.
+		return Invocation{}, &usageError{"missing subcommand"}
 	}
 	return exec.inv, nil
 }

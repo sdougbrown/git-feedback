@@ -10,7 +10,10 @@ modes side by side. It is the reference for harnesses that drive
 Every subcommand writes exactly one JSON value to stdout. The one exception:
 `--help` prints plain help text and exits 0 — on the top level (or `help`),
 on the store command, and on every subcommand (`reconcile --help`,
-`wait --help`, `store reset --help`, …). Go types live in
+`wait --help`, `store reset --help`, …). So does the root `--version` flag.
+Shell completion is a second, narrower exception: the visible `completion`
+command is disabled, but the hidden `__complete`/`__completeNoDesc` protocol
+writes plain completion lines to stdout and exits 0. Go types live in
 `internal/cli/result.go`.
 
 ```json
