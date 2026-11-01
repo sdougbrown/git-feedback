@@ -1,10 +1,9 @@
 module github.com/sdougbrown/git-feedback
 
-go 1.26
-
-toolchain go1.26.0
+go 1.26.8
 
 require (
+	github.com/sdougbrown/cli-contract v0.0.2
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	modernc.org/sqlite v1.50.1

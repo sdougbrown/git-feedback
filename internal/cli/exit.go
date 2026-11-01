@@ -1,10 +1,5 @@
 package cli
 
-import (
-	"os"
-	"syscall"
-)
-
 // Process exit codes.
 const (
 	// ExitOK reports success (including envelope statuses that are not
@@ -23,16 +18,3 @@ const (
 	ExitEvents      = 3
 	ExitHeadChanged = 4
 )
-
-// SignalExitCode maps terminating signals to shell-style exit codes:
-// SIGINT exits 130 and SIGTERM exits 143.
-func SignalExitCode(sig os.Signal) int {
-	switch sig {
-	case os.Interrupt:
-		return 130
-	case syscall.SIGTERM:
-		return 143
-	default:
-		return ExitOperational
-	}
-}

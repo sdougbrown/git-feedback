@@ -8,20 +8,9 @@ import (
 	"github.com/sdougbrown/git-feedback/internal/store"
 )
 
-// handleStore dispatches the store subcommand. The store is a disposable
-// cache: `path` prints where it lives, and `reset` deletes it — wholly or
-// scoped to one target — so the next collection starts from a new baseline.
-// parseInvocation guarantees Sub is "path" or "reset" before dispatch.
-func handleStore(ctx context.Context, inv Invocation) (Result, error) {
-	if inv.Sub == "path" {
-		return handleStorePath(inv)
-	}
-	return handleStoreReset(ctx, inv)
-}
-
 // handleStorePath resolves and reports the effective store directory. It
 // never opens or creates the store.
-func handleStorePath(inv Invocation) (Result, error) {
+func handleStorePath(_ context.Context, inv Invocation) (Result, error) {
 	dir, err := stateDir(inv)
 	if err != nil {
 		return Result{}, err

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/sdougbrown/cli-contract"
 )
 
 // renderHelp runs one help request through Run and returns the plain help
@@ -130,38 +132,35 @@ func TestCompleteProtocolHidden(t *testing.T) {
 	}
 }
 
-// TestCheckHelpMetadata pins the specs-to-help invariant: the current specs
-// pass the cross-check, and a spec stubbed without a help short fails it.
-func TestCheckHelpMetadata(t *testing.T) {
-	// The shipped table satisfies the invariant.
-	checkHelpMetadata()
-
-	// A command added without help metadata fails the cross-check. Stubbing
-	// specs is process-global: safe only because no test in this package
-	// uses t.Parallel().
-	old := specs["bogus"]
-	specs["bogus"] = commandSpec{handle: func(ctx context.Context, inv Invocation) (Result, error) {
-		return Result{}, nil
-	}}
-	t.Cleanup(func() {
-		if old.handle == nil {
-			delete(specs, "bogus")
-		} else {
-			specs["bogus"] = old
-		}
-	})
+// TestValidatePanicsOnDrift pins the declarations-to-help invariant: the
+// shipped declarations pass startup validation, and a command declared
+// without a help short fails it at startup.
+func TestValidatePanicsOnDrift(t *testing.T) {
+	// A command added without help metadata fails validation. Mutating the
+	// declarations is process-global: safe only because no test in this
+	// package uses t.Parallel().
+	bad := &clicontract.Command{
+		Name:  "bogus",
+		Flags: []clicontract.Flag{{Name: "x", Kind: clicontract.Bool, Usage: "x"}},
+		Handle: func(ctx context.Context, inv Invocation) (any, error) {
+			return Result{}, nil
+		},
+	}
+	old := commands
+	commands = append(append([]*clicontract.Command{}, commands...), bad)
+	t.Cleanup(func() { commands = old })
 
 	defer func() {
 		r := recover()
 		if r == nil {
-			t.Fatal("checkHelpMetadata did not panic for a spec without a help short")
+			t.Fatal("Run did not panic for a command without a help short")
 		}
 		msg, ok := r.(string)
 		if !ok || !strings.Contains(msg, `command "bogus" has no help short`) {
 			t.Errorf("panic = %v, want the missing-help-short failure", r)
 		}
 	}()
-	checkHelpMetadata()
+	Run([]string{"reconcile", "u"}, &bytes.Buffer{}, &bytes.Buffer{})
 }
 
 // TestVersionFlag pins the root --version surface: plain text, exit 0.

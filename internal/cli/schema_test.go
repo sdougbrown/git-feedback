@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sdougbrown/cli-contract"
+
 	"github.com/sdougbrown/git-feedback/internal/store"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -37,9 +39,27 @@ func parseSchemaRaw(t *testing.T) (*SchemaDoc, string) {
 	return doc, stdout.String()
 }
 
+// declared resolves one declared command by name (nested names flatten as
+// "store reset").
+func declared(name string) *clicontract.Command {
+	for _, c := range commands {
+		if c.Name == name {
+			return c
+		}
+	}
+	for _, c := range commands {
+		for _, sub := range c.Subcommands {
+			if c.Name+" "+sub.Name == name {
+				return sub
+			}
+		}
+	}
+	return nil
+}
+
 // TestSchemaCommand pins the machine-readable interface contract: it is
-// derived from the same specs table the help renders from, so a new command
-// or flag appears in both or fails the help-metadata cross-check.
+// derived from the same declarations the help renders from, so a new
+// command or flag appears in both or fails startup validation.
 func TestSchemaCommand(t *testing.T) {
 	doc, raw := parseSchemaRaw(t)
 
@@ -59,64 +79,55 @@ func TestSchemaCommand(t *testing.T) {
 		}
 	}
 
-	// Every spec command is present, with its short and flag kinds.
-	for name, spec := range specs {
+	// Every declared command is present, with its short and flag kinds.
+	for _, decl := range commands {
+		name := decl.Name
 		cmd, ok := doc.Commands[name]
 		if !ok {
 			t.Fatalf("schema is missing command %q", name)
 		}
-		if cmd.Short != commandShort[name] {
+		if cmd.Short != decl.Short {
 			t.Errorf("command %q: short = %q", name, cmd.Short)
 		}
-		if cmd.URL != (name != "store") {
-			t.Errorf("command %q: url_positional = %v", name, cmd.URL)
+		if cmd.URL != decl.URL {
+			t.Errorf("command %q: url_positional = %v, want %v", name, cmd.URL, decl.URL)
 		}
-		if name == "store" {
-			continue // flags are checked via the nested subcommands below
+		if len(decl.Subcommands) > 0 {
+			// Flags and subcommands are checked via the nested entries
+			// below.
+			continue
 		}
-		for _, f := range spec.flags {
-			got, ok := cmd.Flags[f.name]
+		for _, f := range decl.Flags {
+			got, ok := cmd.Flags[f.Name]
 			if !ok {
-				t.Errorf("command %q: schema is missing flag %q", name, f.name)
+				t.Errorf("command %q: schema is missing flag %q", name, f.Name)
 				continue
 			}
-			switch f.kind {
-			case flagBool:
-				if got.Kind != "bool" {
-					t.Errorf("command %q flag %q: kind = %q, want bool", name, f.name, got.Kind)
-				}
-			case flagRepeat:
-				if got.Kind != "repeat" {
-					t.Errorf("command %q flag %q: kind = %q, want repeat", name, f.name, got.Kind)
-				}
-			default:
-				if got.Kind != "string" {
-					t.Errorf("command %q flag %q: kind = %q, want string", name, f.name, got.Kind)
-				}
+			if got.Usage != f.Usage {
+				t.Errorf("command %q flag %q: usage = %q, want the declared usage", name, f.Name, got.Usage)
 			}
-			if got.Usage == "" {
-				t.Errorf("command %q flag %q: empty usage", name, f.name)
+			if got.Kind != f.Kind.KindSchema() {
+				t.Errorf("command %q flag %q: kind = %q, want %q", name, f.Name, got.Kind, f.Kind.KindSchema())
 			}
-			// Defaults: the documented effective default when declared,
-			// the flag's zero value otherwise.
-			wantDefault, documented := flagDefault[name+"."+f.name]
-			switch f.kind {
-			case flagBool:
+			// Defaults: the declared effective default when set, the flag's
+			// zero value otherwise.
+			switch {
+			case f.Default != nil:
+				if got.Default != f.Default {
+					t.Errorf("command %q flag %q: default = %v, want %v", name, f.Name, got.Default, f.Default)
+				}
+			case f.Kind == clicontract.Bool:
 				if got.Default != false {
-					t.Errorf("command %q flag %q: default = %v, want false", name, f.name, got.Default)
+					t.Errorf("command %q flag %q: default = %v, want false", name, f.Name, got.Default)
 				}
-			case flagRepeat:
+			case f.Kind == clicontract.Repeat:
 				arr, ok := got.Default.([]any)
 				if !ok || len(arr) != 0 {
-					t.Errorf("command %q flag %q: default = %v, want an empty array", name, f.name, got.Default)
+					t.Errorf("command %q flag %q: default = %v, want an empty array", name, f.Name, got.Default)
 				}
 			default:
-				if documented {
-					if got.Default != wantDefault {
-						t.Errorf("command %q flag %q: default = %v, want %q", name, f.name, got.Default, wantDefault)
-					}
-				} else if got.Default != "" {
-					t.Errorf("command %q flag %q: default = %v, want an empty string", name, f.name, got.Default)
+				if got.Default != "" {
+					t.Errorf("command %q flag %q: default = %v, want an empty string", name, f.Name, got.Default)
 				}
 			}
 		}
@@ -280,8 +291,7 @@ func TestSchemaInHelp(t *testing.T) {
 // here instead of shipping two diverging surfaces.
 func TestSchemaMatchesCommandTree(t *testing.T) {
 	doc := parseSchema(t)
-	exec := &execution{}
-	root := newRootCommand(exec, false)
+	root := app().Tree()
 
 	// Walk the registered tree and require a matching schema entry for
 	// every command.
@@ -347,8 +357,8 @@ func TestSchemaParseOnlyExecution(t *testing.T) {
 	if err == nil {
 		t.Fatal("parseInvocation(schema): err = nil, want a caller error")
 	}
-	var ue *usageError
+	var ue *clicontract.UsageError
 	if !errors.As(err, &ue) {
-		t.Fatalf("parseInvocation(schema): err = %v, want a usageError", err)
+		t.Fatalf("parseInvocation(schema): err = %v, want a UsageError", err)
 	}
 }

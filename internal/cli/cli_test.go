@@ -28,9 +28,6 @@ func TestRegistryArgvOrdering(t *testing.T) {
 		if inv.Flags["head"] != "abc123" {
 			t.Errorf("head = %q", inv.Flags["head"])
 		}
-		if inv.handler == nil {
-			t.Error("handler not bound")
-		}
 	})
 
 	t.Run("url-first ordering", func(t *testing.T) {
@@ -134,15 +131,11 @@ func TestTimeoutOneMillisecondAccepted(t *testing.T) {
 	// A positive duration, however short, must be accepted rather than
 	// rejected as a usage error; the stub handler keeps the test free of
 	// store and network dependencies.
-	// Stubbing specs is process-global: safe only because no test in this
-	// package uses t.Parallel(). Keep it that way, or make the stub local.
-	old := specs["wait"]
-	stub := old
-	stub.handle = func(ctx context.Context, inv Invocation) (Result, error) {
+	// Stubbing the declarations is process-global: safe only because no
+	// test in this package uses t.Parallel().
+	stubHandle(t, "wait", func(ctx context.Context, inv Invocation) (Result, error) {
 		return Result{Command: "wait", Status: StatusOK}, nil
-	}
-	specs["wait"] = stub
-	t.Cleanup(func() { specs["wait"] = old })
+	})
 
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"wait", "--timeout", "1ms", "https://github.com/o/r/pull/1"}, &stdout, &stderr)
@@ -157,19 +150,15 @@ func TestWaitDefaultDeadlineApplied(t *testing.T) {
 	// Stubbing the wait handler keeps the test free of store and network
 	// dependencies, and the handler returns immediately so no 30-minute
 	// wait occurs.
-	// Stubbing specs is process-global: safe only because no test in this
-	// package uses t.Parallel(). Keep it that way, or make the stub local.
+	// Stubbing the declarations is process-global: safe only because no
+	// test in this package uses t.Parallel().
 
 	t.Run("default deadline when --timeout absent", func(t *testing.T) {
 		var gotCtx context.Context
-		old := specs["wait"]
-		stub := old
-		stub.handle = func(ctx context.Context, inv Invocation) (Result, error) {
+		stubHandle(t, "wait", func(ctx context.Context, inv Invocation) (Result, error) {
 			gotCtx = ctx
 			return Result{Command: "wait", Status: StatusOK}, nil
-		}
-		specs["wait"] = stub
-		t.Cleanup(func() { specs["wait"] = old })
+		})
 
 		var stdout, stderr bytes.Buffer
 		code := Run([]string{"wait", "--consumer", "ci", "https://github.com/o/r/pull/1"}, &stdout, &stderr)
@@ -188,14 +177,10 @@ func TestWaitDefaultDeadlineApplied(t *testing.T) {
 
 	t.Run("explicit --timeout 5s overrides", func(t *testing.T) {
 		var gotCtx context.Context
-		old := specs["wait"]
-		stub := old
-		stub.handle = func(ctx context.Context, inv Invocation) (Result, error) {
+		stubHandle(t, "wait", func(ctx context.Context, inv Invocation) (Result, error) {
 			gotCtx = ctx
 			return Result{Command: "wait", Status: StatusOK}, nil
-		}
-		specs["wait"] = stub
-		t.Cleanup(func() { specs["wait"] = old })
+		})
 
 		var stdout, stderr bytes.Buffer
 		code := Run([]string{"wait", "--timeout", "5s", "--consumer", "ci", "https://github.com/o/r/pull/1"}, &stdout, &stderr)
