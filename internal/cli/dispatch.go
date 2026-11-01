@@ -144,10 +144,7 @@ func asUsageError(err error) error {
 // (ack's repeatable --event vs show's single --event).
 func addSpecFlags(fs *pflag.FlagSet, name string, flags []flagSpec) {
 	for _, f := range flags {
-		usage, ok := flagUsage[name+"."+f.name]
-		if !ok {
-			usage = flagUsage[f.name]
-		}
+		usage := flagUsageFor(name, f.name)
 		switch f.kind {
 		case flagBool:
 			fs.Bool(f.name, false, usage)

@@ -3,6 +3,11 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"reflect"
+	"strconv"
+	"strings"
+	"syscall"
 
 	"github.com/sdougbrown/git-feedback/internal/store"
 	"github.com/spf13/cobra"
@@ -54,27 +59,50 @@ type EnvelopeSchema struct {
 	Schema            string              `json:"schema"`
 	Fields            []string            `json:"fields"`
 	Statuses          map[string][]string `json:"statuses"`
+	StatusKeying      string              `json:"status_keying"`
 	UniversalStatuses []string            `json:"universal_statuses"`
 	ErrorCodes        []string            `json:"error_codes"`
 	Documentation     string              `json:"documentation"`
 }
 
-// flagDefault carries documented effective defaults. The flag value is a
-// string and its zero value is empty, but the handler treats the documented
-// default as the value when the flag is absent.
-var flagDefault = map[string]string{
-	"inbox.limit":  "50",
-	"wait.limit":   "50",
-	"wait.timeout": "30m",
+// envelopeFields derives the ordered field list from Result's json tags:
+// the struct is the single source of the envelope shape.
+func envelopeFields() []string {
+	t := reflect.TypeOf(Result{})
+	fields := make([]string, 0, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		name := strings.Split(t.Field(i).Tag.Get("json"), ",")[0]
+		if name == "" || name == "-" {
+			continue
+		}
+		fields = append(fields, name)
+	}
+	return fields
 }
 
-// flagSchemaFor builds the FlagSchema for one flagSpec, with the
-// command-scoped usage lookup shared with help rendering.
-func flagSchemaFor(name string, f flagSpec) FlagSchema {
-	usage, ok := flagUsage[name+"."+f.name]
-	if !ok {
-		usage = flagUsage[f.name]
+// flagDefault carries documented effective defaults. The flag value is a
+// string and its zero value is empty, but the handler treats the documented
+// default as the value when the flag is absent. Built from the constants
+// the handlers actually apply.
+var flagDefault = map[string]string{
+	"inbox.limit":  strconv.Itoa(store.DefaultInboxLimit),
+	"wait.limit":   strconv.Itoa(store.DefaultInboxLimit),
+	"wait.timeout": waitDefaultTimeout.String(),
+}
+
+// flagUsageFor resolves the command-scoped usage string: a
+// "<command>.<flag>" entry wins over the plain flag name. The single
+// lookup both help rendering and the schema document share.
+func flagUsageFor(command, flag string) string {
+	if usage, ok := flagUsage[command+"."+flag]; ok {
+		return usage
 	}
+	return flagUsage[flag]
+}
+
+// flagSchemaFor builds the FlagSchema for one flagSpec.
+func flagSchemaFor(name string, f flagSpec) FlagSchema {
+	usage := flagUsageFor(name, f.name)
 	def, hasDefault := flagDefault[name+"."+f.name]
 	switch f.kind {
 	case flagBool:
@@ -118,17 +146,12 @@ func buildSchema() *SchemaDoc {
 			"head_changed": ExitHeadChanged,
 		},
 		Signals: map[string]int{
-			"SIGINT":  130,
-			"SIGTERM": 143,
+			"SIGINT":  SignalExitCode(os.Interrupt),
+			"SIGTERM": SignalExitCode(syscall.SIGTERM),
 		},
 		Envelope: EnvelopeSchema{
 			Schema: Schema,
-			Fields: []string{
-				"schema", "command", "status", "target", "account",
-				"observed_head", "expected_head", "snapshot", "attempt",
-				"freshness", "reviewer_completion", "events", "has_more",
-				"next_cursor", "export", "store", "object", "error",
-			},
+			Fields: envelopeFields(),
 			Statuses: map[string][]string{
 				"reconcile":   {StatusUpdated, StatusUnchanged, StatusDeferred, StatusBusy, StatusHeadChange},
 				"snapshot":    {StatusOK},
@@ -139,6 +162,9 @@ func buildSchema() *SchemaDoc {
 				"store path":  {StatusOK},
 				"store reset": {StatusUpdated, StatusUnchanged},
 			},
+			// Statuses are keyed by the full command path: nested
+			// subcommands flatten to "store path" / "store reset".
+			StatusKeying:      "full command path",
 			UniversalStatuses: []string{StatusError},
 			ErrorCodes: append([]string{
 				// CLI-declared codes.
@@ -146,17 +172,18 @@ func buildSchema() *SchemaDoc {
 				"not_found", "rate_limited", "collection_error", "state_dir",
 				"internal",
 			},
-				// Store codes pass through mapStoreError into the envelope;
-				// the constants are the stable contract.
+				// Store codes that reach the envelope verbatim: mapStoreError
+				// passes operational store errors through under their constant
+				// code. Caller-mistake codes (invalid cursor, invalid consumer,
+				// target kind mismatch) are remapped to "usage" and so appear
+				// there instead.
 				store.CodeStore, store.CodeStoreCorrupt, store.CodeStoreNewer,
 				store.CodeStoreDataOlder, store.CodeUnknownStream,
 				store.CodeUnknownEvent, store.CodeUnknownSnapshot,
-				store.CodeInvalidCursor, store.CodeInvalidConsumer,
 				store.CodeInvalidLimit, store.CodeInvalidInput,
 				store.CodeFenceLost, store.CodeLeaseBusy,
 				store.CodeDestinationExists, store.CodeExportStateDir,
-				store.CodeExportUnsupported, store.CodeInvalidDestination,
-				store.CodeTargetKindMismatch),
+				store.CodeExportUnsupported, store.CodeInvalidDestination),
 			Documentation: "docs/contract.md",
 		},
 	}

@@ -49,8 +49,14 @@ func TestSchemaCommand(t *testing.T) {
 	if doc.Docs != "docs/contract.md" {
 		t.Errorf("docs = %q", doc.Docs)
 	}
-	if len(doc.Flow) != 3 || doc.Flow[0] != "reconcile" || doc.Flow[2] != "ack" {
-		t.Errorf("typical_flow = %v", doc.Flow)
+	wantFlow := []string{"reconcile", "wait", "ack"}
+	if len(doc.Flow) != len(wantFlow) {
+		t.Fatalf("typical_flow = %v, want %v", doc.Flow, wantFlow)
+	}
+	for i, step := range wantFlow {
+		if doc.Flow[i] != step {
+			t.Errorf("typical_flow[%d] = %q, want %q", i, doc.Flow[i], step)
+		}
 	}
 
 	// Every spec command is present, with its short and flag kinds.
@@ -90,6 +96,28 @@ func TestSchemaCommand(t *testing.T) {
 			}
 			if got.Usage == "" {
 				t.Errorf("command %q flag %q: empty usage", name, f.name)
+			}
+			// Defaults: the documented effective default when declared,
+			// the flag's zero value otherwise.
+			wantDefault, documented := flagDefault[name+"."+f.name]
+			switch f.kind {
+			case flagBool:
+				if got.Default != false {
+					t.Errorf("command %q flag %q: default = %v, want false", name, f.name, got.Default)
+				}
+			case flagRepeat:
+				arr, ok := got.Default.([]any)
+				if !ok || len(arr) != 0 {
+					t.Errorf("command %q flag %q: default = %v, want an empty array", name, f.name, got.Default)
+				}
+			default:
+				if documented {
+					if got.Default != wantDefault {
+						t.Errorf("command %q flag %q: default = %v, want %q", name, f.name, got.Default, wantDefault)
+					}
+				} else if got.Default != "" {
+					t.Errorf("command %q flag %q: default = %v, want an empty string", name, f.name, got.Default)
+				}
 			}
 		}
 	}
@@ -178,6 +206,9 @@ func TestSchemaCommand(t *testing.T) {
 	if len(doc.Envelope.UniversalStatuses) != 1 || doc.Envelope.UniversalStatuses[0] != StatusError {
 		t.Errorf("universal_statuses = %v, want [error]", doc.Envelope.UniversalStatuses)
 	}
+	if doc.Envelope.StatusKeying != "full command path" {
+		t.Errorf("status_keying = %q, want \"full command path\"", doc.Envelope.StatusKeying)
+	}
 	// The error codes are the full stable set: CLI-declared codes plus every
 	// store constant that mapStoreError passes through.
 	wantCodes := map[string]bool{
@@ -187,12 +218,20 @@ func TestSchemaCommand(t *testing.T) {
 		store.CodeStore: true, store.CodeStoreCorrupt: true,
 		store.CodeStoreNewer: true, store.CodeStoreDataOlder: true,
 		store.CodeUnknownStream: true, store.CodeUnknownEvent: true,
-		store.CodeUnknownSnapshot: true, store.CodeInvalidCursor: true,
-		store.CodeInvalidConsumer: true, store.CodeInvalidLimit: true,
+		store.CodeUnknownSnapshot: true, store.CodeInvalidLimit: true,
 		store.CodeInvalidInput: true, store.CodeFenceLost: true,
 		store.CodeLeaseBusy: true, store.CodeDestinationExists: true,
 		store.CodeExportStateDir: true, store.CodeExportUnsupported: true,
-		store.CodeInvalidDestination: true, store.CodeTargetKindMismatch: true,
+		store.CodeInvalidDestination: true,
+	}
+	// The three caller-mistake codes are remapped to "usage" by
+	// mapStoreError and so never appear under their original code.
+	for _, remapped := range []string{
+		store.CodeInvalidCursor, store.CodeInvalidConsumer, store.CodeTargetKindMismatch,
+	} {
+		if wantCodes[remapped] {
+			t.Errorf("error_codes unexpectedly includes remapped code %q", remapped)
+		}
 	}
 	if len(doc.Envelope.ErrorCodes) != len(wantCodes) {
 		t.Errorf("error_codes has %d entries, want %d: %v", len(doc.Envelope.ErrorCodes), len(wantCodes), doc.Envelope.ErrorCodes)
