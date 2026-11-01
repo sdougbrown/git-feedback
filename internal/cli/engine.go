@@ -16,11 +16,11 @@ func newEngineBase(clk clock.Clock) (*tracker.Engine, error) {
 	hooks := ReadTestHooks()
 	apiBase, err := hooks.APIOverride()
 	if err != nil {
-		return nil, &usageError{err.Error()}
+		return nil, &usageError{Message: err.Error()}
 	}
 	minInterval, err := hooks.Interval()
 	if err != nil {
-		return nil, &usageError{err.Error()}
+		return nil, &usageError{Message: err.Error()}
 	}
 	return &tracker.Engine{
 		Clock:       clk,

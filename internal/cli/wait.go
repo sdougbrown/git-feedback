@@ -22,7 +22,7 @@ func handleWait(ctx context.Context, inv Invocation) (Result, error) {
 	}
 	consumer := inv.Flags["consumer"]
 	if consumer == "" {
-		return Result{}, &usageError{"wait requires --consumer <NAME>"}
+		return Result{}, &usageError{Message: "wait requires --consumer <NAME>"}
 	}
 	limit, err := parseLimit(inv)
 	if err != nil {

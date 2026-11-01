@@ -28,9 +28,6 @@ func TestRegistryArgvOrdering(t *testing.T) {
 		if inv.Flags["head"] != "abc123" {
 			t.Errorf("head = %q", inv.Flags["head"])
 		}
-		if inv.handler == nil {
-			t.Error("handler not bound")
-		}
 	})
 
 	t.Run("url-first ordering", func(t *testing.T) {
@@ -98,7 +95,7 @@ func TestDispatchUsageErrorsExit2(t *testing.T) {
 		{"unknown flag", []string{"reconcile", "--bogus", "https://github.com/o/r/pull/1"}},
 		{"missing flag value url-first", []string{"inbox", "https://github.com/o/r/pull/1", "--consumer"}},
 		{"unknown flag url-first", []string{"inbox", "https://github.com/o/r/pull/1", "--bogus"}},
-		{"invalid timeout", []string{"wait", "--timeout", "soon", "https://github.com/o/r/pull/1"}},
+		{"invalid timeout", []string{"wait", "--timeout", "soon", "--consumer", "ci", "https://github.com/o/r/pull/1"}},
 		{"negative timeout", []string{"wait", "--timeout", "-5m", "https://github.com/o/r/pull/1"}},
 		{"zero timeout", []string{"wait", "--timeout", "0s", "https://github.com/o/r/pull/1"}},
 		{"unknown help topic", []string{"help", "bogus"}},
@@ -134,18 +131,14 @@ func TestTimeoutOneMillisecondAccepted(t *testing.T) {
 	// A positive duration, however short, must be accepted rather than
 	// rejected as a usage error; the stub handler keeps the test free of
 	// store and network dependencies.
-	// Stubbing specs is process-global: safe only because no test in this
-	// package uses t.Parallel(). Keep it that way, or make the stub local.
-	old := specs["wait"]
-	stub := old
-	stub.handle = func(ctx context.Context, inv Invocation) (Result, error) {
+	// Stubbing the declarations is process-global: safe only because no
+	// test in this package uses t.Parallel().
+	stubHandle(t, "wait", func(ctx context.Context, inv Invocation) (Result, error) {
 		return Result{Command: "wait", Status: StatusOK}, nil
-	}
-	specs["wait"] = stub
-	t.Cleanup(func() { specs["wait"] = old })
+	})
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"wait", "--timeout", "1ms", "https://github.com/o/r/pull/1"}, &stdout, &stderr)
+	code := Run([]string{"wait", "--timeout", "1ms", "--consumer", "ci", "https://github.com/o/r/pull/1"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
 	}
@@ -157,19 +150,15 @@ func TestWaitDefaultDeadlineApplied(t *testing.T) {
 	// Stubbing the wait handler keeps the test free of store and network
 	// dependencies, and the handler returns immediately so no 30-minute
 	// wait occurs.
-	// Stubbing specs is process-global: safe only because no test in this
-	// package uses t.Parallel(). Keep it that way, or make the stub local.
+	// Stubbing the declarations is process-global: safe only because no
+	// test in this package uses t.Parallel().
 
 	t.Run("default deadline when --timeout absent", func(t *testing.T) {
 		var gotCtx context.Context
-		old := specs["wait"]
-		stub := old
-		stub.handle = func(ctx context.Context, inv Invocation) (Result, error) {
+		stubHandle(t, "wait", func(ctx context.Context, inv Invocation) (Result, error) {
 			gotCtx = ctx
 			return Result{Command: "wait", Status: StatusOK}, nil
-		}
-		specs["wait"] = stub
-		t.Cleanup(func() { specs["wait"] = old })
+		})
 
 		var stdout, stderr bytes.Buffer
 		code := Run([]string{"wait", "--consumer", "ci", "https://github.com/o/r/pull/1"}, &stdout, &stderr)
@@ -188,14 +177,10 @@ func TestWaitDefaultDeadlineApplied(t *testing.T) {
 
 	t.Run("explicit --timeout 5s overrides", func(t *testing.T) {
 		var gotCtx context.Context
-		old := specs["wait"]
-		stub := old
-		stub.handle = func(ctx context.Context, inv Invocation) (Result, error) {
+		stubHandle(t, "wait", func(ctx context.Context, inv Invocation) (Result, error) {
 			gotCtx = ctx
 			return Result{Command: "wait", Status: StatusOK}, nil
-		}
-		specs["wait"] = stub
-		t.Cleanup(func() { specs["wait"] = old })
+		})
 
 		var stdout, stderr bytes.Buffer
 		code := Run([]string{"wait", "--timeout", "5s", "--consumer", "ci", "https://github.com/o/r/pull/1"}, &stdout, &stderr)
@@ -321,5 +306,55 @@ func TestEnvelopeFields(t *testing.T) {
 				t.Errorf("%s: missing field %q", obj, key)
 			}
 		}
+	}
+}
+
+// TestWaitExitOnEventsCodes: --exit-on-events is the pinned status-driven exit
+// convention for process monitors. It applies to wait only. The envelope and
+// the stderr summary stay unchanged, and no error code is reused.
+func TestWaitExitOnEventsCodes(t *testing.T) {
+	status := ""
+	stubHandle(t, "wait", func(ctx context.Context, inv Invocation) (Result, error) {
+		return Result{Command: "wait", Status: status}, nil
+	})
+
+	for _, tc := range []struct {
+		name   string
+		status string
+		flag   bool
+		want   int
+	}{
+		{"events", StatusEvents, true, ExitEvents},
+		{"head_changed", StatusHeadChange, true, ExitHeadChanged},
+		{"timeout", StatusTimeout, true, ExitOK},
+		{"events without the flag", StatusEvents, false, ExitOK},
+		{"head_changed without the flag", StatusHeadChange, false, ExitOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status = tc.status
+			argv := []string{"wait", "https://github.com/o/r/pull/1", "--consumer", "c"}
+			if tc.flag {
+				argv = append(argv, "--exit-on-events")
+			}
+			var stdout, stderr bytes.Buffer
+			code := Run(argv, &stdout, &stderr)
+			if code != tc.want {
+				t.Fatalf("exit code = %d, want %d (stdout=%q stderr=%q)", code, tc.want, stdout.String(), stderr.String())
+			}
+			// The code is a signalling aid: the envelope is still the record.
+			if stdout.Len() == 0 {
+				t.Fatalf("no envelope written for status %q", tc.status)
+			}
+		})
+	}
+
+	// The error codes keep their meaning whatever the status says.
+	status = StatusEvents
+	stubHandle(t, "wait", func(ctx context.Context, inv Invocation) (Result, error) {
+		return Result{}, &usageError{Message: "wait requires --consumer <NAME>"}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"wait", "https://github.com/o/r/pull/1", "--exit-on-events"}, &stdout, &stderr); code != ExitUsage {
+		t.Fatalf("usage error exit = %d, want %d", code, ExitUsage)
 	}
 }

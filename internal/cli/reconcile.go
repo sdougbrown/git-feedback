@@ -122,7 +122,7 @@ func mapReconcileError(err error) error {
 			// A malformed consumer name or a target kind flip is a
 			// caller mistake, like the identical rejection on inbox/ack
 			// via mapStoreError.
-			return &usageError{se.Message}
+			return &usageError{Message: se.Message}
 		}
 		return &statusError{code: se.Code, message: se.Message}
 	}

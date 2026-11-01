@@ -11,7 +11,7 @@ import (
 func handleInbox(ctx context.Context, inv Invocation) (Result, error) {
 	consumer := inv.Flags["consumer"]
 	if consumer == "" {
-		return Result{}, &usageError{"inbox requires --consumer <NAME>"}
+		return Result{}, &usageError{Message: "inbox requires --consumer <NAME>"}
 	}
 	limit, err := parseLimit(inv)
 	if err != nil {

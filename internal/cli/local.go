@@ -74,7 +74,7 @@ func parseTargetURL(raw string) (forge.Target, error) {
 	if errors.Is(err, forge.ErrUnsupportedHost) {
 		return forge.Target{}, &statusError{code: "unsupported_host", message: err.Error()}
 	}
-	return forge.Target{}, &usageError{err.Error()}
+	return forge.Target{}, &usageError{Message: err.Error()}
 }
 
 // resolveLocal resolves the target and account for a local command without
@@ -115,9 +115,7 @@ func parseLimit(inv Invocation) (int, error) {
 	if raw := inv.Flags["limit"]; raw != "" {
 		n, perr := strconv.Atoi(raw)
 		if perr != nil || n < store.MinInboxLimit || n > store.MaxInboxLimit {
-			return 0, &usageError{
-				fmt.Sprintf("invalid --limit %q (expected %d–%d)", raw, store.MinInboxLimit, store.MaxInboxLimit),
-			}
+			return 0, &usageError{Message: fmt.Sprintf("invalid --limit %q (expected %d–%d)", raw, store.MinInboxLimit, store.MaxInboxLimit)}
 		}
 		limit = n
 	}
@@ -250,7 +248,7 @@ func mapStoreError(err error) error {
 	}
 	switch se.Code {
 	case store.CodeInvalidCursor, store.CodeInvalidConsumer, store.CodeTargetKindMismatch:
-		return &usageError{se.Message}
+		return &usageError{Message: se.Message}
 	}
 	return &statusError{code: se.Code, message: se.Message}
 }
