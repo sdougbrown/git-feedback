@@ -13,11 +13,11 @@ import (
 func handleSnapshot(ctx context.Context, inv Invocation) (Result, error) {
 	snapshotID := inv.Flags["snapshot"]
 	if snapshotID == "" {
-		return Result{}, &usageError{"snapshot requires --snapshot <ID>"}
+		return Result{}, &usageError{Message: "snapshot requires --snapshot <ID>"}
 	}
 	output := inv.Flags["output"]
 	if output == "" {
-		return Result{}, &usageError{"snapshot requires --output <FILE>"}
+		return Result{}, &usageError{Message: "snapshot requires --output <FILE>"}
 	}
 	stateDir, err := stateDir(inv)
 	if err != nil {

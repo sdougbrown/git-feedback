@@ -20,14 +20,14 @@ var stdin io.Reader = os.Stdin
 func handleAck(ctx context.Context, inv Invocation) (Result, error) {
 	consumer := inv.Flags["consumer"]
 	if consumer == "" {
-		return Result{}, &usageError{"ack requires --consumer <NAME>"}
+		return Result{}, &usageError{Message: "ack requires --consumer <NAME>"}
 	}
 	ids, err := resolveAckEventIDs(inv)
 	if err != nil {
 		return Result{}, err
 	}
 	if len(ids) == 0 {
-		return Result{}, &usageError{"ack requires at least one --event <ID>"}
+		return Result{}, &usageError{Message: "ack requires at least one --event <ID>"}
 	}
 	clk := newClock()
 	st, err := openStore(inv, clk)
@@ -75,7 +75,7 @@ func resolveAckEventIDs(inv Invocation) ([]string, error) {
 	}
 	if raw := inv.Flags["events-from"]; raw != "" {
 		if raw != "-" {
-			return nil, &usageError{"--events-from only supports '-' (stdin)"}
+			return nil, &usageError{Message: "--events-from only supports '-' (stdin)"}
 		}
 		fromStdin, err := readEventIDsFromStdin(stdin)
 		if err != nil {
@@ -95,7 +95,7 @@ func resolveAckEventIDs(inv Invocation) ([]string, error) {
 	// reject it as a usage error before the store sees it.
 	for _, id := range out {
 		if !store.ValidEventID(id) {
-			return nil, &usageError{fmt.Sprintf("invalid event ID %q: expected e<digits>", id)}
+			return nil, &usageError{Message: fmt.Sprintf("invalid event ID %q: expected e<digits>", id)}
 		}
 	}
 	return out, nil
@@ -110,18 +110,18 @@ func resolveAckEventIDs(inv Invocation) ([]string, error) {
 func readEventIDsFromStdin(r io.Reader) ([]string, error) {
 	raw, err := io.ReadAll(r)
 	if err != nil {
-		return nil, &usageError{fmt.Sprintf("read --events-from stdin: %v", err)}
+		return nil, &usageError{Message: fmt.Sprintf("read --events-from stdin: %v", err)}
 	}
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" {
-		return nil, &usageError{"--events-from - read no event IDs from stdin"}
+		return nil, &usageError{Message: "--events-from - read no event IDs from stdin"}
 	}
 	var ids []string
 	switch {
 	case strings.HasPrefix(trimmed, "["):
 		var items []any
 		if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
-			return nil, &usageError{fmt.Sprintf("--events-from stdin is not a JSON array of IDs or event records: %v", err)}
+			return nil, &usageError{Message: fmt.Sprintf("--events-from stdin is not a JSON array of IDs or event records: %v", err)}
 		}
 		ids = make([]string, 0, len(items))
 		for _, item := range items {
@@ -137,7 +137,7 @@ func readEventIDsFromStdin(r io.Reader) ([]string, error) {
 			HasMore bool  `json:"has_more"`
 		}
 		if err := json.Unmarshal([]byte(trimmed), &envelope); err != nil {
-			return nil, &usageError{fmt.Sprintf("--events-from stdin is not a result envelope: %v", err)}
+			return nil, &usageError{Message: fmt.Sprintf("--events-from stdin is not a result envelope: %v", err)}
 		}
 		ids = make([]string, 0, len(envelope.Events))
 		for _, e := range envelope.Events {
@@ -148,7 +148,7 @@ func readEventIDsFromStdin(r io.Reader) ([]string, error) {
 			ids = append(ids, id)
 		}
 		if envelope.HasMore {
-			return nil, &usageError{"ack --events-from - received a truncated page (has_more: true); rerun inbox or wait with a larger --limit; inbox can page with --after"}
+			return nil, &usageError{Message: "ack --events-from - received a truncated page (has_more: true); rerun inbox or wait with a larger --limit; inbox can page with --after"}
 		}
 	default:
 		ids = make([]string, 0)
@@ -170,7 +170,7 @@ func readEventIDsFromStdin(r io.Reader) ([]string, error) {
 	}
 	ids = kept
 	if len(ids) == 0 {
-		return nil, &usageError{"--events-from - read no event IDs from stdin"}
+		return nil, &usageError{Message: "--events-from - read no event IDs from stdin"}
 	}
 	return ids, nil
 }
@@ -185,14 +185,14 @@ func eventIDFromItem(item any) (string, error) {
 	case map[string]any:
 		raw, ok := v["id"]
 		if !ok {
-			return "", &usageError{`ack --events-from - received an event record without an "id" field`}
+			return "", &usageError{Message: `ack --events-from - received an event record without an "id" field`}
 		}
 		s, ok := raw.(string)
 		if !ok {
-			return "", &usageError{`ack --events-from - received an event record whose "id" is not a string`}
+			return "", &usageError{Message: `ack --events-from - received an event record whose "id" is not a string`}
 		}
 		return s, nil
 	default:
-		return "", &usageError{"ack --events-from - received an item that is neither an ID string nor an event record"}
+		return "", &usageError{Message: "ack --events-from - received an item that is neither an ID string nor an event record"}
 	}
 }

@@ -123,7 +123,7 @@ func handleSchemaRaw(ctx context.Context, inv Invocation, stdout io.Writer) erro
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(buildSchema()); err != nil {
-		return &usageError{fmt.Sprintf("schema: %v", err)}
+		return &usageError{Message: fmt.Sprintf("schema: %v", err)}
 	}
 	return nil
 }

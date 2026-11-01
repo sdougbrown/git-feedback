@@ -30,10 +30,9 @@ func envelope(fn func(ctx context.Context, inv Invocation) (Result, error)) clic
 	return func(ctx context.Context, inv Invocation) (any, error) { return fn(ctx, inv) }
 }
 
-// usageError marks a caller error: exit 2 with the error envelope.
-type usageError struct{ msg string }
-
-func (e *usageError) Error() string { return e.msg }
+// usageError marks a caller error: exit 2 with the error envelope. The
+// library type is aliased so handlers and ExitCode share one vocabulary.
+type usageError = clicontract.UsageError
 
 // statusError is a handler-reported operational failure.
 type statusError struct {
@@ -233,7 +232,7 @@ func (cliAdapter) Validate(inv Invocation) error {
 	if raw := inv.Flags["timeout"]; raw != "" {
 		d, err := time.ParseDuration(raw)
 		if err != nil || d <= 0 {
-			return &usageError{fmt.Sprintf("invalid --timeout %q", raw)}
+			return &usageError{Message: fmt.Sprintf("invalid --timeout %q", raw)}
 		}
 	}
 	return nil
@@ -293,7 +292,7 @@ func errorResult(command string, err error) Result {
 	case errors.As(err, &se):
 		r.Error = &Error{Code: se.code, Message: se.message, Retryable: se.retryable}
 	case errors.As(err, &ue):
-		r.Error = &Error{Code: "usage", Message: ue.msg}
+		r.Error = &Error{Code: "usage", Message: ue.Message}
 	case errors.As(err, &ce):
 		r.Error = &Error{Code: "usage", Message: ce.Message}
 	default:

@@ -14,10 +14,10 @@ import (
 func handleShow(ctx context.Context, inv Invocation) (Result, error) {
 	eventID := inv.Flags["event"]
 	if eventID == "" {
-		return Result{}, &usageError{"show requires --event <ID>"}
+		return Result{}, &usageError{Message: "show requires --event <ID>"}
 	}
 	if !store.ValidEventID(eventID) {
-		return Result{}, &usageError{fmt.Sprintf("invalid event ID %q: expected e<digits>", eventID)}
+		return Result{}, &usageError{Message: fmt.Sprintf("invalid event ID %q: expected e<digits>", eventID)}
 	}
 	clk := newClock()
 	st, err := openStore(inv, clk)

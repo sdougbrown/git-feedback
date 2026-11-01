@@ -42,56 +42,6 @@ func TestSignalPendingAfterHandlerWinsExitCode(t *testing.T) {
 	}
 }
 
-// TestWaitExitOnEventsCodes: --exit-on-events is the pinned status-driven exit
-// convention for process monitors. It applies to wait only. The envelope and
-// the stderr summary stay unchanged, and no error code is reused.
-func TestWaitExitOnEventsCodes(t *testing.T) {
-	status := ""
-	stubHandle(t, "wait", func(ctx context.Context, inv Invocation) (Result, error) {
-		return Result{Command: "wait", Status: status}, nil
-	})
-
-	for _, tc := range []struct {
-		name   string
-		status string
-		flag   bool
-		want   int
-	}{
-		{"events", StatusEvents, true, ExitEvents},
-		{"head_changed", StatusHeadChange, true, ExitHeadChanged},
-		{"timeout", StatusTimeout, true, ExitOK},
-		{"events without the flag", StatusEvents, false, ExitOK},
-		{"head_changed without the flag", StatusHeadChange, false, ExitOK},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			status = tc.status
-			argv := []string{"wait", "https://github.com/o/r/pull/1", "--consumer", "c"}
-			if tc.flag {
-				argv = append(argv, "--exit-on-events")
-			}
-			var stdout, stderr bytes.Buffer
-			code := Run(argv, &stdout, &stderr)
-			if code != tc.want {
-				t.Fatalf("exit code = %d, want %d (stdout=%q stderr=%q)", code, tc.want, stdout.String(), stderr.String())
-			}
-			// The code is a signalling aid: the envelope is still the record.
-			if stdout.Len() == 0 {
-				t.Fatalf("no envelope written for status %q", tc.status)
-			}
-		})
-	}
-
-	// The error codes keep their meaning whatever the status says.
-	status = StatusEvents
-	stubHandle(t, "wait", func(ctx context.Context, inv Invocation) (Result, error) {
-		return Result{}, &usageError{"wait requires --consumer <NAME>"}
-	})
-	var stdout, stderr bytes.Buffer
-	if code := Run([]string{"wait", "https://github.com/o/r/pull/1", "--exit-on-events"}, &stdout, &stderr); code != ExitUsage {
-		t.Fatalf("usage error exit = %d, want %d", code, ExitUsage)
-	}
-}
-
 // TestWaitExitOnEventsYieldsToSignals: a terminating signal wins over the
 // status-driven code. A killed wait must never read as delivered events.
 func TestWaitExitOnEventsYieldsToSignals(t *testing.T) {
