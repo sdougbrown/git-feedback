@@ -102,6 +102,7 @@ func TestDispatchUsageErrorsExit2(t *testing.T) {
 		{"negative timeout", []string{"wait", "--timeout", "-5m", "https://github.com/o/r/pull/1"}},
 		{"zero timeout", []string{"wait", "--timeout", "0s", "https://github.com/o/r/pull/1"}},
 		{"unknown help topic", []string{"help", "bogus"}},
+		{"schema stray positional", []string{"schema", "extra"}},
 		{"disabled completion command", []string{"completion"}},
 	}
 	for _, tc := range tests {

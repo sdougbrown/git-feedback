@@ -342,7 +342,7 @@ func newRootCommand(exec *execution, runHandlers bool) *cobra.Command {
 			continue
 		}
 		cmd := &cobra.Command{
-			Use:   name + " <URL>",
+			Use:   commandUse(name),
 			Short: commandShort[name],
 			Args:  exactlyOneURL(name),
 			RunE:  dispatchRunE(exec, runHandlers, name, ""),
@@ -350,7 +350,7 @@ func newRootCommand(exec *execution, runHandlers bool) *cobra.Command {
 		addSpecFlags(cmd.Flags(), name, spec.flags)
 		root.AddCommand(cmd)
 	}
-	root.AddCommand(newSchemaCommand())
+	root.AddCommand(newSchemaCommand(exec, runHandlers))
 	return root
 }
 

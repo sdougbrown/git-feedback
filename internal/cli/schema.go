@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/sdougbrown/git-feedback/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -45,15 +46,25 @@ type FlagSchema struct {
 }
 
 // EnvelopeSchema describes the result envelope: its schema id, the ordered
-// field list every command emits, the statuses each command can report
-// (plus the universal error status), the error codes, and where the prose
-// contract lives.
+// field list every command emits, the statuses each command can report, the
+// universal status every command can report on failure, the error codes,
+// and where the prose contract lives.
 type EnvelopeSchema struct {
-	Schema        string              `json:"schema"`
-	Fields        []string            `json:"fields"`
-	Statuses      map[string][]string `json:"statuses"`
-	ErrorCodes    []string            `json:"error_codes"`
-	Documentation string              `json:"documentation"`
+	Schema            string              `json:"schema"`
+	Fields            []string            `json:"fields"`
+	Statuses          map[string][]string `json:"statuses"`
+	UniversalStatuses []string            `json:"universal_statuses"`
+	ErrorCodes        []string            `json:"error_codes"`
+	Documentation     string              `json:"documentation"`
+}
+
+// flagDefault carries documented effective defaults the flags' zero values
+// do not express: the flag value is a string, but the handler treats it as
+// the documented default when absent.
+var flagDefault = map[string]string{
+	"inbox.limit":  "50",
+	"wait.limit":   "50",
+	"wait.timeout": "30m",
 }
 
 // flagSchemaFor builds the FlagSchema for one flagSpec, with the
@@ -63,12 +74,16 @@ func flagSchemaFor(name string, f flagSpec) FlagSchema {
 	if !ok {
 		usage = flagUsage[f.name]
 	}
+	def, hasDefault := flagDefault[name+"."+f.name]
 	switch f.kind {
 	case flagBool:
 		return FlagSchema{Kind: "bool", Usage: usage, Default: false}
 	case flagRepeat:
 		return FlagSchema{Kind: "repeat", Usage: usage, Default: []string{}}
 	default:
+		if hasDefault {
+			return FlagSchema{Kind: "string", Usage: usage, Default: def}
+		}
 		return FlagSchema{Kind: "string", Usage: usage, Default: ""}
 	}
 }
@@ -114,16 +129,33 @@ func buildSchema() *SchemaDoc {
 				"next_cursor", "export", "store", "object", "error",
 			},
 			Statuses: map[string][]string{
-				"reconcile":   {"updated", "unchanged", "deferred", "busy", "head_changed"},
-				"snapshot":    {"ok"},
-				"inbox":       {"ok"},
-				"show":        {"ok"},
-				"ack":         {"ok"},
-				"wait":        {"events", "timeout", "head_changed"},
-				"store path":  {"ok"},
-				"store reset": {"updated", "unchanged"},
+				"reconcile":   {StatusUpdated, StatusUnchanged, StatusDeferred, StatusBusy, StatusHeadChange},
+				"snapshot":    {StatusOK},
+				"inbox":       {StatusOK},
+				"show":        {StatusOK},
+				"ack":         {StatusOK},
+				"wait":        {StatusEvents, StatusTimeout, StatusHeadChange},
+				"store path":  {StatusOK},
+				"store reset": {StatusUpdated, StatusUnchanged},
 			},
-			ErrorCodes:    []string{"usage", "unsupported_host", "unknown_stream", "internal"},
+			UniversalStatuses: []string{StatusError},
+			ErrorCodes: append([]string{
+				// CLI-declared codes.
+				"usage", "unsupported_host", "ambiguous_account", "auth",
+				"not_found", "rate_limited", "collection_error", "state_dir",
+				"internal",
+			},
+				// Store codes pass through mapStoreError into the envelope;
+				// the constants are the stable contract.
+				store.CodeStore, store.CodeStoreCorrupt, store.CodeStoreNewer,
+				store.CodeStoreDataOlder, store.CodeUnknownStream,
+				store.CodeUnknownEvent, store.CodeUnknownSnapshot,
+				store.CodeInvalidCursor, store.CodeInvalidConsumer,
+				store.CodeInvalidLimit, store.CodeInvalidInput,
+				store.CodeFenceLost, store.CodeLeaseBusy,
+				store.CodeDestinationExists, store.CodeExportStateDir,
+				store.CodeExportUnsupported, store.CodeInvalidDestination,
+				store.CodeTargetKindMismatch),
 			Documentation: "docs/contract.md",
 		},
 	}
@@ -138,17 +170,23 @@ func buildSchema() *SchemaDoc {
 			cmd.Subcommands = map[string]CommandSchema{
 				"path": {
 					Short: storeSubShort["path"],
-					Use:   "git-feedback store path [flags]",
+					Use:   "path",
 				},
 				"reset": {
 					Short: storeSubShort["reset"],
-					Use:   "git-feedback store reset [flags]",
+					Use:   "reset",
 					Flags: flagsSchema("store", spec.flags),
 				},
 			}
 			cmd.Flags = nil
 		}
 		doc.Commands[name] = cmd
+	}
+	// The document describes itself: schema is a real command a harness can
+	// invoke, so a consumer enumerating doc.Commands discovers it.
+	doc.Commands["schema"] = CommandSchema{
+		Short: "print the machine-readable interface contract as JSON",
+		Use:   "schema",
 	}
 	return doc
 }
@@ -163,13 +201,17 @@ func commandUse(name string) string {
 
 // newSchemaCommand builds the schema command. Its output is the one JSON
 // schema document, not an envelope; exec.ran stays false so Run exits 0
-// without writing an envelope.
-func newSchemaCommand() *cobra.Command {
+// without writing an envelope. Parse-only executions (parseInvocation) skip
+// the body entirely.
+func newSchemaCommand(exec *execution, runHandlers bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   "schema",
 		Short: "print the machine-readable interface contract as JSON",
 		Args:  noArgs("schema"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !runHandlers {
+				return nil
+			}
 			// One JSON document on stdout; HTML escaping stays off so
 			// synopsis markers like <URL> render literally.
 			enc := json.NewEncoder(cmd.OutOrStdout())
