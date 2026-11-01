@@ -59,7 +59,7 @@ type EnvelopeSchema struct {
 	Schema            string              `json:"schema"`
 	Fields            []string            `json:"fields"`
 	Statuses          map[string][]string `json:"statuses"`
-	StatusKeying      string              `json:"status_keying"`
+	StatusKeyedBy     string              `json:"status_keyed_by"`
 	UniversalStatuses []string            `json:"universal_statuses"`
 	ErrorCodes        []string            `json:"error_codes"`
 	Documentation     string              `json:"documentation"`
@@ -164,7 +164,7 @@ func buildSchema() *SchemaDoc {
 			},
 			// Statuses are keyed by the full command path: nested
 			// subcommands flatten to "store path" / "store reset".
-			StatusKeying:      "full command path",
+			StatusKeyedBy:     "full command path",
 			UniversalStatuses: []string{StatusError},
 			ErrorCodes: append([]string{
 				// CLI-declared codes.

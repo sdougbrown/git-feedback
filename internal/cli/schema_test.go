@@ -206,8 +206,8 @@ func TestSchemaCommand(t *testing.T) {
 	if len(doc.Envelope.UniversalStatuses) != 1 || doc.Envelope.UniversalStatuses[0] != StatusError {
 		t.Errorf("universal_statuses = %v, want [error]", doc.Envelope.UniversalStatuses)
 	}
-	if doc.Envelope.StatusKeying != "full command path" {
-		t.Errorf("status_keying = %q, want \"full command path\"", doc.Envelope.StatusKeying)
+	if doc.Envelope.StatusKeyedBy != "full command path" {
+		t.Errorf("status_keyed_by = %q, want \"full command path\"", doc.Envelope.StatusKeyedBy)
 	}
 	// The error codes are the full stable set: CLI-declared codes plus every
 	// store constant that mapStoreError passes through.
