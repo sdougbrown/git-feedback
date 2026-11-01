@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -86,9 +87,11 @@ func TestHelpCommand(t *testing.T) {
 	// TestDispatchUsageErrorsExit2 (exit 2, usage envelope).
 }
 
-// TestSetVersion pins the version wiring end to end: the value set via
-// SetVersion reaches the --version output, so a dropped call or a template
-// that stops reading the version cannot report a stale value silently.
+// TestSetVersion pins the version template: the value set via SetVersion
+// reaches the --version output, so a template that stops reading the cli
+// version cannot report a stale value silently. The main.go wiring is
+// pinned in integration (the built binary prints the "git-feedback "
+// prefix); the ldflags value itself is not assertable from tests.
 func TestSetVersion(t *testing.T) {
 	old := version
 	SetVersion("x.9.9-test")
@@ -124,6 +127,40 @@ func TestCompleteProtocolHidden(t *testing.T) {
 			t.Errorf("%v: printed a JSON envelope", argv)
 		}
 	}
+}
+
+// TestCheckHelpMetadata pins the specs-to-help invariant: the current specs
+// pass the cross-check, and a spec stubbed without a help short fails it.
+func TestCheckHelpMetadata(t *testing.T) {
+	// The shipped table satisfies the invariant.
+	checkHelpMetadata()
+
+	// A command added without help metadata fails the cross-check. Stubbing
+	// specs is process-global: safe only because no test in this package
+	// uses t.Parallel().
+	old := specs["bogus"]
+	specs["bogus"] = commandSpec{handle: func(ctx context.Context, inv Invocation) (Result, error) {
+		return Result{}, nil
+	}}
+	t.Cleanup(func() {
+		if old.handle == nil {
+			delete(specs, "bogus")
+		} else {
+			specs["bogus"] = old
+		}
+	})
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("checkHelpMetadata did not panic for a spec without a help short")
+		}
+		msg, ok := r.(string)
+		if !ok || !strings.Contains(msg, `command "bogus" has no help short`) {
+			t.Errorf("panic = %v, want the missing-help-short failure", r)
+		}
+	}()
+	checkHelpMetadata()
 }
 
 // TestVersionFlag pins the root --version surface: plain text, exit 0.

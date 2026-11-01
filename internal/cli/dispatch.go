@@ -385,7 +385,11 @@ func newStoreCommand(exec *execution, runHandlers bool, spec commandSpec) *cobra
 // init cross-checks the help metadata against the specs table: a command or
 // flag added to specs without a matching help entry would otherwise render
 // blank help text instead of failing here.
-func init() {
+func init() { checkHelpMetadata() }
+
+// checkHelpMetadata panics when any spec command or flag lacks its help
+// entry. Extracted from init so the invariant itself is testable.
+func checkHelpMetadata() {
 	for name, spec := range specs {
 		if commandShort[name] == "" {
 			panic(fmt.Sprintf("cli: command %q has no help short", name))
@@ -399,6 +403,11 @@ func init() {
 	for _, f := range commonFlags {
 		if flagUsage[f.name] == "" {
 			panic(fmt.Sprintf("cli: common flag %q has no usage string", f.name))
+		}
+	}
+	for _, sub := range []string{"path", "reset"} {
+		if storeSubShort[sub] == "" {
+			panic(fmt.Sprintf("cli: store subcommand %q has no help short", sub))
 		}
 	}
 }
