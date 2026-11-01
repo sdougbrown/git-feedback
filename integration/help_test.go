@@ -26,8 +26,9 @@ func TestTopLevelHelp(t *testing.T) {
 	}
 	stdout := string(out)
 	for _, want := range []string{
-		"reconcile     collect feedback and establish the baseline",
-		"ack           acknowledge delivered event IDs",
+		"reconcile",
+		"collect feedback and establish the baseline",
+		"acknowledge delivered event IDs",
 		"reconcile → wait → ack",
 		"acknowledges nothing",
 		"Operational errors exit 1, usage errors",

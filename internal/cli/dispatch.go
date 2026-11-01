@@ -5,14 +5,15 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // handlerFunc runs one parsed subcommand invocation.
@@ -106,102 +107,284 @@ var specs = map[string]commandSpec{
 	},
 }
 
+// version is the build version reported by --version; main sets it from the
+// build-time ldflags value.
+var version = "dev"
+
+// SetVersion records the build version reported by --version.
+func SetVersion(v string) { version = v }
+
+// execution collects what one command execution produced. The same cobra
+// tree serves two modes: dispatch (handlers run, results are captured) and
+// parse-only (parseInvocation runs it to validate argv and capture the
+// Invocation without executing anything).
+type execution struct {
+	inv    Invocation
+	result Result
+	err    error
+	ran    bool
+}
+
+// asUsageError guarantees the usage-envelope error code for every
+// dispatch-level failure: unknown commands, flag errors, and positional
+// validation all leave the tree as caller errors, whatever error type
+// cobra raised internally.
+func asUsageError(err error) error {
+	var ue *usageError
+	if errors.As(err, &ue) {
+		return ue
+	}
+	return &usageError{err.Error()}
+}
+
+// addSpecFlags registers one spec's flags on a flag set, with the generated
+// usage strings.
+func addSpecFlags(fs *pflag.FlagSet, flags []flagSpec) {
+	for _, f := range flags {
+		switch f.kind {
+		case flagBool:
+			fs.Bool(f.name, false, flagUsage[f.name])
+		case flagRepeat:
+			fs.StringArray(f.name, nil, flagUsage[f.name])
+		default:
+			fs.String(f.name, "", flagUsage[f.name])
+		}
+	}
+}
+
+// exactlyOneURL validates the URL positionals for URL-taking commands.
+func exactlyOneURL(name string) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		switch {
+		case len(args) == 0:
+			return &usageError{fmt.Sprintf("%s: missing <URL>", name)}
+		case len(args) > 1:
+			return &usageError{fmt.Sprintf("%s: unexpected argument %q", name, args[1])}
+		}
+		return nil
+	}
+}
+
+// noArgs validates that a nested subcommand took no positionals.
+func noArgs(name string) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) > 0 {
+			return &usageError{fmt.Sprintf("%s: unexpected argument %q", name, args[0])}
+		}
+		return nil
+	}
+}
+
+// invocationFrom builds the Invocation from one parsed cobra command.
+func invocationFrom(cmd *cobra.Command, name, sub string, args []string) (Invocation, error) {
+	spec := specs[name]
+	inv := Invocation{
+		Command: name,
+		Sub:     sub,
+		URL:     "",
+		Flags:   map[string]string{},
+		Bools:   map[string]bool{},
+		handler: spec.handle,
+	}
+	if name != "store" {
+		inv.URL = args[0] // validated by exactlyOneURL
+	}
+	fs := cmd.Flags()
+	for _, f := range append(append([]flagSpec{}, commonFlags...), spec.flags...) {
+		// Nested subcommands share the parent's spec: skip spec flags the
+		// subcommand does not carry (store path has no --target).
+		if fs.Lookup(f.name) == nil {
+			continue
+		}
+		switch f.kind {
+		case flagBool:
+			b, err := fs.GetBool(f.name)
+			if err != nil {
+				return Invocation{}, err
+			}
+			inv.Bools[f.name] = b
+		case flagRepeat:
+			arr, err := fs.GetStringArray(f.name)
+			if err != nil {
+				return Invocation{}, err
+			}
+			inv.Events = arr
+		default:
+			s, err := fs.GetString(f.name)
+			if err != nil {
+				return Invocation{}, err
+			}
+			inv.Flags[f.name] = s
+		}
+	}
+	return inv, nil
+}
+
+// validateTimeout enforces the --timeout duration contract: a present
+// --timeout must parse to a positive duration.
+func validateTimeout(inv Invocation) error {
+	raw := inv.Flags["timeout"]
+	if raw == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return &usageError{fmt.Sprintf("invalid --timeout %q", raw)}
+	}
+	return nil
+}
+
+// deadlineContext applies the explicit --timeout deadline, or the pinned
+// default deadline for wait when --timeout is absent.
+func deadlineContext(ctx context.Context, inv Invocation) (context.Context, context.CancelFunc) {
+	if raw := inv.Flags["timeout"]; raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			return context.WithTimeout(ctx, d)
+		}
+		return ctx, func() {}
+	}
+	if inv.Command == "wait" {
+		return context.WithTimeout(ctx, waitDefaultTimeout)
+	}
+	return ctx, func() {}
+}
+
+// deprecationNotice reports the legacy --exclude-self spelling on stderr.
+func deprecationNotice(inv Invocation, stderr io.Writer) {
+	if inv.Bools["exclude-self"] {
+		fmt.Fprintln(stderr, "--exclude-self is deprecated and is a no-op; use --include-self to deliver your own events")
+	}
+}
+
+// dispatchRunE builds the RunE shared by every dispatching command: capture
+// the Invocation, and in dispatch mode run the handler and record the result.
+func dispatchRunE(exec *execution, runHandlers bool, name, sub string, urlCommand bool) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		inv, err := invocationFrom(cmd, name, sub, args)
+		if err != nil {
+			return err
+		}
+		exec.inv = inv
+		exec.ran = true
+		if !runHandlers {
+			return nil
+		}
+		deprecationNotice(inv, cmd.ErrOrStderr())
+		// A pre-handler caller error (bad --timeout) propagates: Execute
+		// surfaces it as the usage envelope with exit 2.
+		if verr := validateTimeout(inv); verr != nil {
+			return verr
+		}
+		ctx, cancel := deadlineContext(cmd.Context(), inv)
+		defer cancel()
+		result, herr := specs[inv.Command].handle(ctx, inv)
+		if herr != nil {
+			result = errorResult(inv.Command, herr)
+		}
+		exec.result = result
+		exec.err = herr
+		return nil
+	}
+}
+
+// newRootCommand builds the cobra command tree from specs. The specs table
+// stays the single source of truth: every flag, positional rule, and handler
+// binding below is derived from it.
+func newRootCommand(exec *execution, runHandlers bool) *cobra.Command {
+	root := &cobra.Command{
+		Use:     "git-feedback",
+		Short:   "Observe GitHub review feedback and deliver replayable events",
+		Long:    Usage,
+		Version: version,
+		// Dispatch never returns operational failures: everything that
+		// escapes the tree is a caller error, so keep cobra silent and map
+		// errors to the usage envelope in Run.
+		SilenceErrors:      true,
+		SilenceUsage:       true,
+		DisableSuggestions: true,
+		// The generated completion command is not part of the documented
+		// surface; the hidden __complete protocol stays available.
+		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return &usageError{"missing subcommand"}
+		},
+	}
+	// Flag errors and unknown commands are caller errors: code them as
+	// usage errors so the envelope reports code "usage".
+	// Match the historical `git-feedback <version>` output.
+	root.SetVersionTemplate("git-feedback {{.Version}}\n")
+	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		return &usageError{fmt.Sprintf("%s: %v", cmd.Name(), err)}
+	})
+	addSpecFlags(root.PersistentFlags(), commonFlags)
+
+	for name, spec := range specs {
+		if name == "store" {
+			root.AddCommand(newStoreCommand(exec, runHandlers, spec))
+			continue
+		}
+		cmd := &cobra.Command{
+			Use:   name + " <URL>",
+			Short: commandShort[name],
+			Args:  exactlyOneURL(name),
+			RunE:  dispatchRunE(exec, runHandlers, name, "", true),
+		}
+		addSpecFlags(cmd.Flags(), spec.flags)
+		root.AddCommand(cmd)
+	}
+	return root
+}
+
+// newStoreCommand builds the store command and its nested path/reset
+// subcommands. The envelope's command field stays "store"; Sub selects the
+// nested subcommand.
+func newStoreCommand(exec *execution, runHandlers bool, spec commandSpec) *cobra.Command {
+	store := &cobra.Command{
+		Use:   "store",
+		Short: commandShort["store"],
+		Long:  StoreUsage,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return &usageError{`store requires a subcommand: "path" or "reset"`}
+		},
+	}
+	path := &cobra.Command{
+		Use:   "path",
+		Short: storeSubShort["path"],
+		Args:  noArgs("store path"),
+		RunE:  dispatchRunE(exec, runHandlers, "store", "path", false),
+	}
+	reset := &cobra.Command{
+		Use:   "reset",
+		Short: storeSubShort["reset"],
+		Args:  noArgs("store reset"),
+		RunE:  dispatchRunE(exec, runHandlers, "store", "reset", false),
+	}
+	addSpecFlags(reset.Flags(), spec.flags)
+	store.AddCommand(path, reset)
+	return store
+}
+
 // parseInvocation parses argv (without the program name) for one subcommand.
-// Both `git-feedback <sub> <URL> [flags]` and `git-feedback <sub> [flags]
-// <URL>` are accepted: for URL-first input the leading positional is removed
-// before flag parsing; otherwise flags are parsed first and exactly one
-// remaining positional URL is required. Other interleavings and extra
-// positionals are rejected as usage errors.
+// It executes the cobra tree in parse-only mode: handlers do not run, and
+// flags and positionals are validated by the same Args functions that
+// dispatch uses. Both `git-feedback <sub> <URL> [flags]` and
+// `git-feedback <sub> [flags] <URL>` are accepted: pflag parses flags
+// interspersed with positionals, and exactly one remaining positional URL
+// is required. Other interleavings and extra positionals are rejected as
+// usage errors.
 func parseInvocation(argv []string) (Invocation, error) {
 	if len(argv) == 0 {
 		return Invocation{}, &usageError{"missing subcommand"}
 	}
-	cmd, rest := argv[0], argv[1:]
-	spec, ok := specs[cmd]
-	if !ok {
-		return Invocation{}, &usageError{fmt.Sprintf("unknown subcommand %q", cmd)}
+	exec := &execution{}
+	root := newRootCommand(exec, false)
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	root.SetArgs(argv)
+	if err := root.Execute(); err != nil {
+		return Invocation{}, asUsageError(err)
 	}
-
-	// The store command takes a nested subcommand instead of a URL:
-	// `store path` or `store reset [--target <URL>]`.
-	sub := ""
-	if cmd == "store" {
-		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
-			return Invocation{}, &usageError{`store requires a subcommand: "path" or "reset"`}
-		}
-		sub = rest[0]
-		rest = rest[1:]
-		if sub != "path" && sub != "reset" {
-			return Invocation{}, &usageError{fmt.Sprintf("unknown store subcommand %q (want %q or %q)", sub, "path", "reset")}
-		}
-	}
-
-	inv := Invocation{Command: cmd, Sub: sub, Flags: map[string]string{}, Bools: map[string]bool{}, handler: spec.handle}
-
-	// The store command takes no URL positional; its arguments are flags only.
-	urlFirst := cmd != "store" && len(rest) > 0 && !strings.HasPrefix(rest[0], "-")
-	if urlFirst {
-		inv.URL = rest[0]
-		rest = rest[1:]
-	}
-
-	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	stringVals := map[string]*string{}
-	boolVals := map[string]*bool{}
-	var events *EventFlags
-	all := append(append([]flagSpec{}, commonFlags...), spec.flags...)
-	for _, f := range all {
-		switch f.kind {
-		case flagBool:
-			boolVals[f.name] = fs.Bool(f.name, false, "")
-		case flagRepeat:
-			ev := &EventFlags{}
-			fs.Var(ev, f.name, "")
-			events = ev
-		default:
-			s := ""
-			fs.StringVar(&s, f.name, "", "")
-			stringVals[f.name] = &s
-		}
-	}
-	if err := fs.Parse(rest); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return Invocation{}, &usageError{fmt.Sprintf("%s: help is documented as git-feedback --help", cmd)}
-		}
-		return Invocation{}, &usageError{fmt.Sprintf("%s: %v", cmd, err)}
-	}
-
-	if cmd == "store" {
-		// The store command never takes a URL positional.
-		if fs.NArg() != 0 {
-			return Invocation{}, &usageError{fmt.Sprintf("%s: unexpected argument %q", cmd, fs.Arg(0))}
-		}
-	} else if urlFirst {
-		if fs.NArg() != 0 {
-			return Invocation{}, &usageError{fmt.Sprintf("%s: unexpected argument %q", cmd, fs.Arg(0))}
-		}
-	} else {
-		switch {
-		case fs.NArg() == 0:
-			return Invocation{}, &usageError{fmt.Sprintf("%s: missing <URL>", cmd)}
-		case fs.NArg() > 1:
-			return Invocation{}, &usageError{fmt.Sprintf("%s: unexpected argument %q", cmd, fs.Arg(1))}
-		default:
-			inv.URL = fs.Arg(0)
-		}
-	}
-
-	for name, p := range stringVals {
-		inv.Flags[name] = *p
-	}
-	for name, p := range boolVals {
-		inv.Bools[name] = *p
-	}
-	if events != nil {
-		inv.Events = []string(*events)
-	}
-	return inv, nil
+	return exec.inv, nil
 }
 
 // Run executes one CLI invocation: it parses argv, wires the signal- and
@@ -214,57 +397,34 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		command = argv[0]
 	}
 
-	// --help on the store command prints the store-specific help on stdout
-	// and exits 0; plain `store` without --help keeps the missing-subcommand
-	// usage error.
-	if command == "store" && hasHelpFlag(argv[1:]) {
-		fmt.Fprint(stdout, StoreUsage)
-		return ExitOK
-	}
-
-	inv, err := parseInvocation(argv)
-	if err != nil {
-		writeResult(stdout, errorResult(command, err))
-		fmt.Fprintln(stderr, err.Error())
-		return ExitUsage
-	}
-	if inv.Bools["exclude-self"] {
-		fmt.Fprintln(stderr, "--exclude-self is deprecated and is a no-op; use --include-self to deliver your own events")
-	}
+	exec := &execution{}
+	root := newRootCommand(exec, true)
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.SetArgs(argv)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	if raw := inv.Flags["timeout"]; raw != "" {
-		d, derr := time.ParseDuration(raw)
-		if derr != nil || d <= 0 {
-			writeResult(stdout, errorResult(inv.Command, &usageError{fmt.Sprintf("invalid --timeout %q", raw)}))
-			fmt.Fprintf(stderr, "invalid --timeout %q\n", raw)
-			return ExitUsage
-		}
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, d)
-		defer cancel()
+	if err := root.ExecuteContext(ctx); err != nil {
+		// Help never reaches here (cobra writes plain help and returns
+		// nil); every error that does is a caller error with the usage
+		// envelope and exit 2.
+		err = asUsageError(err)
+		writeResult(stdout, errorResult(command, err))
+		fmt.Fprintln(stderr, err.Error())
+		return ExitUsage
 	}
-	if inv.Command == "wait" && inv.Flags["timeout"] == "" {
-		// Apply the pinned default deadline; an explicit --timeout above
-		// already derived the context.
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, waitDefaultTimeout)
-		defer cancel()
+	// Help paths (bare --help, the help command, <command> --help) print
+	// plain text and exit 0 without an envelope; ran is set only when a
+	// subcommand dispatched.
+	if !exec.ran {
+		return ExitOK
 	}
-
-	result, herr := inv.handler(ctx, inv)
-	if herr != nil {
-		result = errorResult(inv.Command, herr)
-		// The envelope is the machine-readable record; this line keeps the
-		// stderr diagnostic promise for handler failures.
-		fmt.Fprintln(stderr, herr.Error())
-	}
+	result := exec.result
 
 	// A terminating signal exits with its shell code and no stdout output.
 	select {
@@ -286,6 +446,12 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// The envelope is the machine-readable record; this line keeps the
+	// stderr diagnostic promise for handler failures.
+	if exec.err != nil {
+		fmt.Fprintln(stderr, exec.err.Error())
+	}
+
 	if err := writeResult(stdout, result); err != nil {
 		fmt.Fprintln(stderr, err.Error())
 		return ExitOperational
@@ -293,7 +459,7 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 	// One-line status summary on the diagnostics channel: monitor commands
 	// point at `wait` and read the outcome from the process output without
 	// parsing the envelope.
-	if inv.Command == "wait" &&
+	if result.Command == "wait" &&
 		(result.Status == StatusEvents || result.Status == StatusTimeout) {
 		fmt.Fprintf(stderr, "git-feedback wait: status=%s events=%d has_more=%t\n",
 			result.Status, len(result.Events), result.HasMore)
@@ -307,7 +473,7 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 	}
 	if result.Error != nil {
 		var ue *usageError
-		if errors.As(herr, &ue) {
+		if exec.err != nil && errors.As(exec.err, &ue) {
 			return ExitUsage
 		}
 		return ExitOperational
@@ -315,7 +481,7 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 	// Opt-in status-driven codes: a monitor that signals on process exit
 	// separates delivered events from the deadline expiry without parsing
 	// stderr or the envelope. Errors and signals above keep their own codes.
-	if inv.Command == "wait" && inv.Bools["exit-on-events"] {
+	if exec.inv.Command == "wait" && exec.inv.Bools["exit-on-events"] {
 		switch result.Status {
 		case StatusEvents:
 			return ExitEvents
@@ -352,16 +518,6 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	n, err := c.w.Write(p)
 	*c.n += int64(n)
 	return n, err
-}
-
-// hasHelpFlag reports whether args contain a help request (--help or -h).
-func hasHelpFlag(args []string) bool {
-	for _, a := range args {
-		if a == "--help" || a == "-h" {
-			return true
-		}
-	}
-	return false
 }
 
 // errorResult builds the error envelope for a failure.

@@ -7,22 +7,34 @@ import (
 	"testing"
 )
 
+// renderHelp runs one help request through Run and returns the plain help
+// text on stdout. Help exits 0 without an envelope.
+func renderHelp(t *testing.T, argv []string) string {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := Run(argv, &stdout, &stderr)
+	if code != ExitOK {
+		t.Fatalf("%v: exit code = %d, want 0 (stderr: %s)", argv, code, stderr.String())
+	}
+	return stdout.String()
+}
+
 // TestUsageContent pins the agent-facing content of the bare help: the
 // per-command descriptions, the typical flow, and the envelope/exit-code
-// contract that registry and harness callers key on.
+// contract that registry and harness callers key on. The generated Usage
+// and Flags sections come from the cobra command tree, so this also guards
+// the specs-to-help wiring.
 func TestUsageContent(t *testing.T) {
+	help := renderHelp(t, []string{"--help"})
 	for _, want := range []string{
 		"git-feedback observes GitHub review feedback",
-		"reconcile <URL>",
-		"snapshot <URL>",
-		"inbox <URL>",
-		"ack <URL>",
-		"wait <URL>",
-		"store path",
-		"store reset",
-		"reconcile     collect feedback and establish the baseline",
-		"wait          block until new events arrive or --timeout elapses",
-		"store path    print the resolved store directory; never opens the store",
+		"collect feedback and establish the baseline",
+		"export a stored collection to a file",
+		"list pending events for a consumer",
+		"fetch one event's stored object content",
+		"acknowledge delivered event IDs",
+		"block until new events arrive or --timeout elapses",
+		"disposable store utilities",
 		"reconcile → wait → ack",
 		"issue URL (/issues/N)",
 		"--skip-head-changed, and",
@@ -36,8 +48,35 @@ func TestUsageContent(t *testing.T) {
 		"--version",
 		"--help",
 	} {
-		if !strings.Contains(Usage, want) {
+		if !strings.Contains(help, want) {
 			t.Errorf("Usage is missing %q", want)
+		}
+	}
+}
+
+// TestSubcommandHelp pins the per-subcommand help surface: every command
+// answers --help on its own with its synopsis and generated flag docs, and
+// exits 0 without an envelope.
+func TestSubcommandHelp(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want []string
+	}{
+		{[]string{"inbox", "--help"}, []string{"inbox <URL>", "list pending events for a consumer", "--consumer", "name identifying this reader", "--limit", "--ids-only", "--after", "--include-self", "--state-dir"}},
+		{[]string{"ack", "--help"}, []string{"ack <URL>", "acknowledge delivered event IDs", "--event", "event ID to acknowledge", "--events-from", "read event IDs from a file, or - for stdin"}},
+		{[]string{"wait", "--help"}, []string{"wait <URL>", "--timeout", "maximum wait duration (default 30m)", "--skip-head-changed", "exit-on-events", "exit 3 when events are delivered"}},
+		{[]string{"reconcile", "--help"}, []string{"reconcile <URL>", "collect feedback and establish the baseline", "--head", "expected head SHA"}},
+		{[]string{"store", "reset", "--help"}, []string{"store reset", "--target", "scope the reset to one target URL"}},
+	} {
+		help := renderHelp(t, tc.argv)
+		for _, want := range tc.want {
+			if !strings.Contains(help, want) {
+				t.Errorf("%v: help is missing %q", tc.argv, want)
+			}
+		}
+		// Help is plain text: no JSON envelope leaks into stdout.
+		if strings.HasPrefix(strings.TrimSpace(help), "{") {
+			t.Errorf("%v: help output starts with a JSON envelope", tc.argv)
 		}
 	}
 }
@@ -52,7 +91,14 @@ func TestStoreHelpRouting(t *testing.T) {
 		if code != ExitOK {
 			t.Fatalf("%v: exit code = %d, want 0 (stderr: %s)", argv, code, stderr.String())
 		}
-		for _, want := range []string{"store path", "store reset", "never opens the store", "docs/contract.md"} {
+		for _, want := range []string{
+			"path",
+			"reset",
+			"print the resolved store directory; never opens the store",
+			"delete the store, wholly or scoped to one --target URL",
+			"The store is a cache",
+			"docs/contract.md",
+		} {
 			if !strings.Contains(stdout.String(), want) {
 				t.Errorf("%v: store help is missing %q", argv, want)
 			}
