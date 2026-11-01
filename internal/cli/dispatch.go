@@ -350,6 +350,7 @@ func newRootCommand(exec *execution, runHandlers bool) *cobra.Command {
 		addSpecFlags(cmd.Flags(), name, spec.flags)
 		root.AddCommand(cmd)
 	}
+	root.AddCommand(newSchemaCommand())
 	return root
 }
 

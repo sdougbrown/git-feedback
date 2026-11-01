@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"os/exec"
 	"strings"
 	"testing"
@@ -31,6 +32,39 @@ func TestVersionFlag(t *testing.T) {
 	}
 	if strings.HasPrefix(strings.TrimSpace(stdout), "{") {
 		t.Error("--version printed a JSON envelope")
+	}
+}
+
+// TestSchemaDocument verifies that the production binary's schema command
+// emits one parseable interface-contract document naming every command.
+func TestSchemaDocument(t *testing.T) {
+	prod, _ := binPaths(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, prod, "schema")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	if code := cmd.ProcessState.ExitCode(); code != 0 {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+	var doc struct {
+		Schema   string `json:"schema"`
+		Commands map[string]struct {
+			Short string `json:"short"`
+		}
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("schema: stdout is not one JSON value: %v", err)
+	}
+	if doc.Schema != "git-feedback/cli-schema/v1" {
+		t.Errorf("schema = %q", doc.Schema)
+	}
+	for _, name := range []string{"reconcile", "wait", "store"} {
+		if _, ok := doc.Commands[name]; !ok {
+			t.Errorf("schema is missing command %q", name)
+		}
 	}
 }
 

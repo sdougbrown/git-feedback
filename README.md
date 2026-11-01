@@ -51,7 +51,9 @@ git feedback <subcommand> [flags] <URL>
 
 Both forms are equivalent; `git feedback` is resolved by Git to the
 `git-feedback` binary on `PATH`. Use `git-feedback --help` for usage (Git
-intercepts `git feedback --help` before it reaches the tool).
+intercepts `git feedback --help` before it reaches the tool). Harnesses and
+agents can parse the interface instead: `git-feedback schema` prints the
+commands, flags, exit codes, and envelope shape as one JSON document.
 
 ```
 git-feedback reconcile <URL> [--head <SHA>] [--account <LOGIN>] [--state-dir <DIR>] [--json]
