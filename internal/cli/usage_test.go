@@ -45,6 +45,7 @@ func TestUsageContent(t *testing.T) {
 		`exactly one JSON envelope with a "status" field`,
 		"Operational errors exit 1, usage errors",
 		"key on \"status\",",
+		"git-feedback schema",
 		"docs/contract.md",
 		"--version",
 		"--help",

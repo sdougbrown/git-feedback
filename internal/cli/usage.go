@@ -24,7 +24,8 @@ Contract:
   code. The one exception is opt-in and wait-only: --exit-on-events exits 3
   when it delivers events and 4 when a pinned head moved, so a process
   monitor reads the outcome from the exit status alone. timeout stays 0.
-  Full machine contract: docs/contract.md.
+  Full machine contract: docs/contract.md; the parseable interface (commands,
+  flags, statuses, exit codes) is git-feedback schema.
 
 inbox and wait exclude events authored by the stream's own account by
 default. --include-self opts back in; the legacy --exclude-self spelling is
