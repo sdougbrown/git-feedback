@@ -12,10 +12,13 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sdougbrown/cli-contract"
+
+	"github.com/sdougbrown/git-feedback/internal/store"
 )
 
 // Invocation carries one parsed command invocation.
@@ -96,7 +99,7 @@ func buildCommands() []*clicontract.Command {
 			URL:   true,
 			Flags: []clicontract.Flag{
 				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream"},
-				{Name: "limit", Kind: clicontract.String, Usage: "maximum events to return (1-200, default 50)", Default: "50"},
+				{Name: "limit", Kind: clicontract.String, Usage: "maximum events to return (1-200, default 50)", Default: strconv.Itoa(store.DefaultInboxLimit)},
 				{Name: "after", Kind: clicontract.String, Usage: "cursor from a previous inbox page; fetch the next page"},
 				{Name: "ids-only", Kind: clicontract.Bool, Usage: "return event IDs only, without full event records"},
 				{Name: "include-self", Kind: clicontract.Bool, Usage: "include events authored by the stream's own account (excluded by default)"},
@@ -133,7 +136,7 @@ func buildCommands() []*clicontract.Command {
 				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream"},
 				{Name: "timeout", Kind: clicontract.String, Usage: "maximum wait duration (default 30m)", Default: waitDefaultTimeout.String()},
 				{Name: "head", Kind: clicontract.String, Usage: "expected head SHA; report head_changed when the observed head no longer matches"},
-				{Name: "limit", Kind: clicontract.String, Usage: "maximum events to return (1-200, default 50)", Default: "50"},
+				{Name: "limit", Kind: clicontract.String, Usage: "maximum events to return (1-200, default 50)", Default: strconv.Itoa(store.DefaultInboxLimit)},
 				{Name: "include-self", Kind: clicontract.Bool, Usage: "include events authored by the stream's own account (excluded by default)"},
 				{Name: "exclude-self", Kind: clicontract.Bool, Usage: "deprecated no-op; self-authored events are already excluded"},
 				{Name: "skip-empty-reviews", Kind: clicontract.Bool, Usage: "skip review events whose review body and comments are empty"},
@@ -265,12 +268,6 @@ func (cliAdapter) AfterWrite(inv Invocation, result any, stderr io.Writer) {
 		fmt.Fprintf(stderr, "git-feedback wait: status=%s events=%d has_more=%t\n",
 			r.Status, len(r.Events), r.HasMore)
 	}
-}
-
-// surface exposes the declared commands for schema derivation without the
-// root prose, breaking the declaration cycle.
-func surface() *clicontract.App {
-	return &clicontract.App{Commands: commands, CommonFlags: commonFlags}
 }
 
 // Run executes one CLI invocation: it parses argv, runs the handler, writes

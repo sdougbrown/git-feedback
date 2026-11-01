@@ -39,24 +39,6 @@ func parseSchemaRaw(t *testing.T) (*SchemaDoc, string) {
 	return doc, stdout.String()
 }
 
-// declared resolves one declared command by name (nested names flatten as
-// "store reset").
-func declared(name string) *clicontract.Command {
-	for _, c := range commands {
-		if c.Name == name {
-			return c
-		}
-	}
-	for _, c := range commands {
-		for _, sub := range c.Subcommands {
-			if c.Name+" "+sub.Name == name {
-				return sub
-			}
-		}
-	}
-	return nil
-}
-
 // TestSchemaCommand pins the machine-readable interface contract: it is
 // derived from the same declarations the help renders from, so a new
 // command or flag appears in both or fails startup validation.

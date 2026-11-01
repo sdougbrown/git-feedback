@@ -419,6 +419,12 @@ func TestStoreUsageErrors(t *testing.T) {
 			if code != ExitUsage {
 				t.Fatalf("exit code = %d, want 2 (stderr: %s)", code, stderr.String())
 			}
+			// The bare-store message enumerates the declared subcommands.
+			if tc.name == "missing subcommand" || tc.name == "store, no args" {
+				if !strings.Contains(stderr.String(), `store requires a subcommand: "path" or "reset"`) {
+					t.Errorf("stderr = %q, want the enumerated subcommand message", stderr.String())
+				}
+			}
 			var envelope map[string]any
 			if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
 				t.Fatalf("stdout is not one JSON value: %v (%q)", err, stdout.String())

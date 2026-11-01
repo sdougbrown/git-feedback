@@ -62,8 +62,8 @@ func buildSchema() *SchemaDoc {
 		CliVersion:  version,
 		Docs:        "docs/contract.md",
 		Flow:        []string{"reconcile", "wait", "ack"},
-		CommonFlags: surface().CommonFlagSchemas(),
-		Commands:    surface().Schemas(),
+		CommonFlags: app().CommonFlagSchemas(),
+		Commands:    app().Schemas(),
 		ExitCodes: map[string]int{
 			"ok":           ExitOK,
 			"operational":  ExitOperational,

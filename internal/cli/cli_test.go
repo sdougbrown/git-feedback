@@ -95,7 +95,7 @@ func TestDispatchUsageErrorsExit2(t *testing.T) {
 		{"unknown flag", []string{"reconcile", "--bogus", "https://github.com/o/r/pull/1"}},
 		{"missing flag value url-first", []string{"inbox", "https://github.com/o/r/pull/1", "--consumer"}},
 		{"unknown flag url-first", []string{"inbox", "https://github.com/o/r/pull/1", "--bogus"}},
-		{"invalid timeout", []string{"wait", "--timeout", "soon", "https://github.com/o/r/pull/1"}},
+		{"invalid timeout", []string{"wait", "--timeout", "soon", "--consumer", "ci", "https://github.com/o/r/pull/1"}},
 		{"negative timeout", []string{"wait", "--timeout", "-5m", "https://github.com/o/r/pull/1"}},
 		{"zero timeout", []string{"wait", "--timeout", "0s", "https://github.com/o/r/pull/1"}},
 		{"unknown help topic", []string{"help", "bogus"}},
@@ -138,7 +138,7 @@ func TestTimeoutOneMillisecondAccepted(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"wait", "--timeout", "1ms", "https://github.com/o/r/pull/1"}, &stdout, &stderr)
+	code := Run([]string{"wait", "--timeout", "1ms", "--consumer", "ci", "https://github.com/o/r/pull/1"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr: %s)", code, stderr.String())
 	}

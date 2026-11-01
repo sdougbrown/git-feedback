@@ -151,14 +151,11 @@ func TestValidatePanicsOnDrift(t *testing.T) {
 	t.Cleanup(func() { commands = old })
 
 	defer func() {
-		r := recover()
-		if r == nil {
+		if r := recover(); r == nil {
 			t.Fatal("Run did not panic for a command without a help short")
 		}
-		msg, ok := r.(string)
-		if !ok || !strings.Contains(msg, `command "bogus" has no help short`) {
-			t.Errorf("panic = %v, want the missing-help-short failure", r)
-		}
+		// The panic wording is the library's contract, pinned there; this
+		// side only asserts the startup failure happens.
 	}()
 	Run([]string{"reconcile", "u"}, &bytes.Buffer{}, &bytes.Buffer{})
 }
