@@ -74,19 +74,32 @@ func TestHelpCommand(t *testing.T) {
 		t.Error("help reconcile: help is missing the reconcile synopsis")
 	}
 
+	// A nested topic exercises the multi-argument Find branch.
 	stdout.Reset()
-	stderr.Reset()
-	code := Run([]string{"help", "bogus"}, &stdout, &stderr)
-	if code != ExitUsage {
-		t.Fatalf("help bogus: exit code = %d, want 2", code)
+	if code := Run([]string{"help", "store", "reset"}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("help store reset: exit code = %d, want 0", code)
 	}
-	var envelope map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
-		t.Fatalf("help bogus: stdout is not one JSON value: %v (%q)", err, stdout.String())
+	if !strings.Contains(stdout.String(), "delete the store, wholly or scoped to one --target URL") {
+		t.Error("help store reset: help is missing the reset synopsis")
 	}
-	errObj, ok := envelope["error"].(map[string]any)
-	if !ok || errObj["code"] != "usage" {
-		t.Errorf("help bogus: error envelope = %v, want code usage", envelope["error"])
+	// The unknown-help-topic error path is pinned in
+	// TestDispatchUsageErrorsExit2 (exit 2, usage envelope).
+}
+
+// TestSetVersion pins the version wiring end to end: the value set via
+// SetVersion reaches the --version output, so a dropped call or a template
+// that stops reading the version cannot report a stale value silently.
+func TestSetVersion(t *testing.T) {
+	old := version
+	SetVersion("x.9.9-test")
+	t.Cleanup(func() { SetVersion(old) })
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"--version"}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("--version: exit code = %d, want 0", code)
+	}
+	if !strings.Contains(stdout.String(), "git-feedback x.9.9-test") {
+		t.Errorf("--version output = %q, want the set version \"x.9.9-test\"", stdout.String())
 	}
 }
 
@@ -96,18 +109,20 @@ func TestHelpCommand(t *testing.T) {
 // `completion` command itself is disabled (pinned in
 // TestDispatchUsageErrorsExit2).
 func TestCompleteProtocolHidden(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := Run([]string{"__complete", ""}, &stdout, &stderr)
-	if code != ExitOK {
-		t.Fatalf("__complete: exit code = %d, want 0 (stderr: %s)", code, stderr.String())
-	}
-	for _, want := range []string{"reconcile", "inbox", "store"} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Errorf("__complete output is missing %q", want)
+	for _, argv := range [][]string{{"__complete", ""}, {"__completeNoDesc", ""}} {
+		var stdout, stderr bytes.Buffer
+		code := Run(argv, &stdout, &stderr)
+		if code != ExitOK {
+			t.Fatalf("%v: exit code = %d, want 0 (stderr: %s)", argv, code, stderr.String())
 		}
-	}
-	if strings.HasPrefix(strings.TrimSpace(stdout.String()), "{") {
-		t.Error("__complete printed a JSON envelope")
+		for _, want := range []string{"reconcile", "inbox", "store"} {
+			if !strings.Contains(stdout.String(), want) {
+				t.Errorf("%v: output is missing %q", argv, want)
+			}
+		}
+		if strings.HasPrefix(strings.TrimSpace(stdout.String()), "{") {
+			t.Errorf("%v: printed a JSON envelope", argv)
+		}
 	}
 }
 

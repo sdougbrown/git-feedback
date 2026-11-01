@@ -227,33 +227,19 @@ func invocationFrom(cmd *cobra.Command, name, sub string, args []string) (Invoca
 	return inv, nil
 }
 
-// validateTimeout enforces the --timeout duration contract: a present
-// --timeout must parse to a positive duration.
-func validateTimeout(inv Invocation) error {
+// timeoutDuration parses the --timeout value once for both validation and
+// the deadline: ok is false when --timeout is absent, and a malformed or
+// non-positive value is a caller error.
+func timeoutDuration(inv Invocation) (time.Duration, bool, error) {
 	raw := inv.Flags["timeout"]
 	if raw == "" {
-		return nil
+		return 0, false, nil
 	}
 	d, err := time.ParseDuration(raw)
 	if err != nil || d <= 0 {
-		return &usageError{fmt.Sprintf("invalid --timeout %q", raw)}
+		return 0, true, &usageError{fmt.Sprintf("invalid --timeout %q", raw)}
 	}
-	return nil
-}
-
-// deadlineContext applies the explicit --timeout deadline, or the pinned
-// default deadline for wait when --timeout is absent.
-func deadlineContext(ctx context.Context, inv Invocation) (context.Context, context.CancelFunc) {
-	if raw := inv.Flags["timeout"]; raw != "" {
-		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
-			return context.WithTimeout(ctx, d)
-		}
-		return ctx, func() {}
-	}
-	if inv.Command == "wait" {
-		return context.WithTimeout(ctx, waitDefaultTimeout)
-	}
-	return ctx, func() {}
+	return d, true, nil
 }
 
 // deprecationNotice reports the legacy --exclude-self spelling on stderr.
@@ -277,13 +263,23 @@ func dispatchRunE(exec *execution, runHandlers bool, name, sub string) func(*cob
 			return nil
 		}
 		deprecationNotice(inv, cmd.ErrOrStderr())
-		// A pre-handler caller error (bad --timeout) propagates: Execute
-		// surfaces it as the usage envelope with exit 2.
-		if verr := validateTimeout(inv); verr != nil {
-			return verr
+		// A caller error (bad --timeout) propagates: Execute surfaces it as
+		// the usage envelope with exit 2.
+		d, hasTimeout, terr := timeoutDuration(inv)
+		if terr != nil {
+			return terr
 		}
-		ctx, cancel := deadlineContext(cmd.Context(), inv)
-		defer cancel()
+		ctx := cmd.Context()
+		if hasTimeout {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, d)
+			defer cancel()
+		} else if inv.Command == "wait" {
+			// Apply the pinned default deadline.
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, waitDefaultTimeout)
+			defer cancel()
+		}
 		result, herr := specs[inv.Command].handle(ctx, inv)
 		if herr != nil {
 			result = errorResult(inv.Command, herr)
@@ -384,6 +380,27 @@ func newStoreCommand(exec *execution, runHandlers bool, spec commandSpec) *cobra
 	addSpecFlags(reset.Flags(), "store", spec.flags)
 	store.AddCommand(path, reset)
 	return store
+}
+
+// init cross-checks the help metadata against the specs table: a command or
+// flag added to specs without a matching help entry would otherwise render
+// blank help text instead of failing here.
+func init() {
+	for name, spec := range specs {
+		if commandShort[name] == "" {
+			panic(fmt.Sprintf("cli: command %q has no help short", name))
+		}
+		for _, f := range spec.flags {
+			if flagUsage[name+"."+f.name] == "" && flagUsage[f.name] == "" {
+				panic(fmt.Sprintf("cli: flag %q on command %q has no usage string", f.name, name))
+			}
+		}
+	}
+	for _, f := range commonFlags {
+		if flagUsage[f.name] == "" {
+			panic(fmt.Sprintf("cli: common flag %q has no usage string", f.name))
+		}
+	}
 }
 
 // parseInvocation parses argv (without the program name) for one subcommand.
