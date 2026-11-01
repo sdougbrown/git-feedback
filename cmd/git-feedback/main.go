@@ -4,7 +4,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/sdougbrown/git-feedback/internal/cli"
@@ -18,13 +17,6 @@ func main() {
 	if len(argv) > 0 && argv[0] == "feedback" {
 		argv = argv[1:]
 	}
-	if len(argv) > 0 && argv[0] == "--version" {
-		fmt.Printf("git-feedback %s\n", version)
-		return
-	}
-	if len(argv) > 0 && (argv[0] == "--help" || argv[0] == "-h") {
-		fmt.Print(cli.Usage)
-		return
-	}
+	cli.SetVersion(version)
 	os.Exit(cli.Run(argv, os.Stdout, os.Stderr))
 }
