@@ -186,7 +186,7 @@ func TestSubcommandHelp(t *testing.T) {
 	}{
 		{[]string{"inbox", "--help"}, []string{"inbox <URL>", "list pending events for a consumer", "--consumer", "name identifying this reader", "--limit", "--ids-only", "--after", "--include-self", "--state-dir"}},
 		{[]string{"ack", "--help"}, []string{"ack <URL>", "acknowledge delivered event IDs", "--event", "event ID to acknowledge", "--events-from", "read event IDs from a file, or - for stdin"}},
-		{[]string{"wait", "--help"}, []string{"wait <URL>", "--timeout", "maximum wait duration (default 30m)", "--skip-head-changed", "exit-on-events", "exit 3 when events are delivered"}},
+		{[]string{"wait", "--help"}, []string{"wait <URL>", "--timeout", "maximum wait duration (default \"30m0s\")", "--skip-head-changed", "exit-on-events", "exit 3 when events are delivered"}},
 		{[]string{"reconcile", "--help"}, []string{"reconcile <URL>", "collect feedback and establish the baseline", "--head", "expected head SHA"}},
 		{[]string{"snapshot", "--help"}, []string{"snapshot <URL>", "export a stored collection to a file", "--snapshot", "ID of the stored snapshot", "--output", "file path for the exported snapshot JSON"}},
 		{[]string{"show", "--help"}, []string{"show <URL>", "fetch one event's stored object content", "--event", "event ID to display"}},
