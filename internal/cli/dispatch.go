@@ -98,7 +98,7 @@ func buildCommands() []*clicontract.Command {
 			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
 				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream", Required: true},
-				{Name: "limit", Kind: clicontract.String, Usage: "maximum events to return (1-200, default 50)", Default: strconv.Itoa(store.DefaultInboxLimit)},
+				{Name: "limit", Kind: clicontract.String, Usage: "maximum events to return (1-200)", Default: strconv.Itoa(store.DefaultInboxLimit)},
 				{Name: "after", Kind: clicontract.String, Usage: "cursor from a previous inbox page; fetch the next page"},
 				{Name: "ids-only", Kind: clicontract.Bool, Usage: "return event IDs only, without full event records"},
 				{Name: "include-self", Kind: clicontract.Bool, Usage: "include events authored by the stream's own account (excluded by default)"},
@@ -133,9 +133,9 @@ func buildCommands() []*clicontract.Command {
 			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
 				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream", Required: true},
-				{Name: "timeout", Kind: clicontract.String, Usage: "maximum wait duration (default 30m)", Default: waitDefaultTimeout.String()},
+				{Name: "timeout", Kind: clicontract.String, Usage: "maximum wait duration", Default: waitDefaultTimeout.String()},
 				{Name: "head", Kind: clicontract.String, Usage: "expected head SHA; report head_changed when the observed head no longer matches"},
-				{Name: "limit", Kind: clicontract.String, Usage: "maximum events to return (1-200, default 50)", Default: strconv.Itoa(store.DefaultInboxLimit)},
+				{Name: "limit", Kind: clicontract.String, Usage: "maximum events to return (1-200)", Default: strconv.Itoa(store.DefaultInboxLimit)},
 				{Name: "include-self", Kind: clicontract.Bool, Usage: "include events authored by the stream's own account (excluded by default)"},
 				{Name: "exclude-self", Kind: clicontract.Bool, Usage: "deprecated no-op; self-authored events are already excluded"},
 				{Name: "skip-empty-reviews", Kind: clicontract.Bool, Usage: "skip review events whose review body and comments are empty"},
