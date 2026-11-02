@@ -112,8 +112,8 @@ func buildCommands() []*clicontract.Command {
 			Short:       "acknowledge delivered event IDs",
 			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
-				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream"},
-				{Name: "event", Kind: clicontract.Repeat, Usage: "event ID to acknowledge; repeat the flag for multiple IDs", Required: true},
+				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream", Required: true},
+				{Name: "event", Kind: clicontract.Repeat, Usage: "event ID to acknowledge; repeat the flag for multiple IDs, or read IDs from --events-from"},
 				{Name: "events-from", Kind: clicontract.String, Usage: "read event IDs from a file, or - for stdin"},
 			},
 			Handle: envelope(handleAck),
