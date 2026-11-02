@@ -44,7 +44,7 @@ func handleReconcile(ctx context.Context, inv Invocation) (Result, error) {
 		return Result{}, err
 	}
 	res, err := eng.Reconcile(ctx, tracker.ReconcileInput{
-		URL:     inv.URL,
+		URL:     inv.Args[0],
 		Head:    inv.Flags["head"],
 		Account: inv.Flags["account"],
 	})

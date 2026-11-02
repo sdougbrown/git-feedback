@@ -19,7 +19,7 @@ func TestRegistryArgvOrdering(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parseInvocation: %v", err)
 		}
-		if inv.Command != "reconcile" || inv.URL != url {
+		if inv.Command != "reconcile" || inv.Args[0] != url {
 			t.Fatalf("inv = %+v", inv)
 		}
 		if inv.Flags["account"] != "Alice" {
@@ -37,7 +37,7 @@ func TestRegistryArgvOrdering(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parseInvocation: %v", err)
 		}
-		if inv.URL != url || inv.Flags["head"] != "abc123" {
+		if inv.Args[0] != url || inv.Flags["head"] != "abc123" {
 			t.Fatalf("inv = %+v", inv)
 		}
 	})
@@ -49,7 +49,7 @@ func TestRegistryArgvOrdering(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parseInvocation: %v", err)
 		}
-		if inv.URL != url || inv.Flags["consumer"] != "ci" || inv.Flags["account"] != "alice" {
+		if inv.Args[0] != url || inv.Flags["consumer"] != "ci" || inv.Flags["account"] != "alice" {
 			t.Fatalf("inv = %+v", inv)
 		}
 		if len(inv.Events) != 2 || inv.Events[0] != "e1" || inv.Events[1] != "e2" {
@@ -64,7 +64,7 @@ func TestRegistryArgvOrdering(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parseInvocation: %v", err)
 		}
-		if inv.URL != url || inv.Flags["timeout"] != "5m" || inv.Flags["consumer"] != "ci" || inv.Flags["limit"] != "10" {
+		if inv.Args[0] != url || inv.Flags["timeout"] != "5m" || inv.Flags["consumer"] != "ci" || inv.Flags["limit"] != "10" {
 			t.Fatalf("inv = %+v", inv)
 		}
 	})
@@ -76,7 +76,7 @@ func TestRegistryArgvOrdering(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parseInvocation: %v", err)
 		}
-		if inv.URL != url || inv.Flags["snapshot"] != "s1" || inv.Flags["output"] != "/tmp/snap.json" {
+		if inv.Args[0] != url || inv.Flags["snapshot"] != "s1" || inv.Flags["output"] != "/tmp/snap.json" {
 			t.Fatalf("inv = %+v", inv)
 		}
 	})

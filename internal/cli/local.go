@@ -62,7 +62,7 @@ func wrapStoreOpenError(err error) error {
 // as an operational error before any credential lookup; malformed URLs and
 // GitHub URLs that are neither a pull request nor an issue are caller errors.
 func parseTarget(inv Invocation) (forge.Target, error) {
-	return parseTargetURL(inv.URL)
+	return parseTargetURL(inv.Args[0])
 }
 
 // parseTargetURL resolves one raw URL with the same rules as parseTarget.
