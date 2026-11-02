@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
@@ -340,16 +339,36 @@ func TestSchemaMatchesCommandTree(t *testing.T) {
 	}
 }
 
-// TestSchemaParseOnlyExecution pins the parse-only invariant: the schema
-// command produces no Invocation, so parse-only execution reports it as a
-// caller error exactly like the help paths, and no body output escapes.
+// TestSchemaParseOnlyExecution pins the parse-only behavior of the schema
+// command: Parse returns the raw command's Invocation without error, and
+// Run exits 0 after the raw handler writes its own output — no result
+// envelope is emitted on top.
 func TestSchemaParseOnlyExecution(t *testing.T) {
-	_, err := parseInvocation([]string{"schema"})
-	if err == nil {
-		t.Fatal("parseInvocation(schema): err = nil, want a caller error")
+	inv, err := parseInvocation([]string{"schema"})
+	if err != nil {
+		t.Fatalf("parseInvocation(schema): err = %v, want nil", err)
 	}
-	var ue *clicontract.UsageError
-	if !errors.As(err, &ue) {
-		t.Fatalf("parseInvocation(schema): err = %v, want a UsageError", err)
+	if inv.Command != "schema" {
+		t.Fatalf("parseInvocation(schema): command = %q, want \"schema\"", inv.Command)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"schema"}, &stdout, &stderr)
+	if code != ExitOK {
+		t.Fatalf("Run(schema): exit code = %d, want 0 (stderr: %s)", code, stderr.String())
+	}
+	// The raw handler writes the schema document itself; Run adds no
+	// result envelope on top, so stdout is exactly one JSON document with
+	// the schema document's own schema id.
+	var doc map[string]any
+	dec := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
+	if err := dec.Decode(&doc); err != nil {
+		t.Fatalf("Run(schema): stdout is not one JSON document: %v\n%s", err, stdout.String())
+	}
+	if doc["schema"] != "git-feedback/cli-schema/v1" {
+		t.Errorf("Run(schema): stdout document schema = %v, want git-feedback/cli-schema/v1", doc["schema"])
+	}
+	if dec.More() {
+		t.Errorf("Run(schema): stdout carries output after the schema document:\n%s", stdout.String())
 	}
 }
