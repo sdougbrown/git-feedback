@@ -339,11 +339,10 @@ func TestSchemaMatchesCommandTree(t *testing.T) {
 	}
 }
 
-// TestSchemaParseOnlyExecution pins the parse-only behavior of the schema
-// command: Parse returns the raw command's Invocation without error, and
-// Run exits 0 after the raw handler writes its own output — no result
-// envelope is emitted on top.
-func TestSchemaParseOnlyExecution(t *testing.T) {
+// TestSchemaRawExecution pins how the raw schema command runs: Parse returns
+// its Invocation without error, and Run exits 0 after the raw handler writes
+// its own output, with no result envelope on top.
+func TestSchemaRawExecution(t *testing.T) {
 	inv, err := parseInvocation([]string{"schema"})
 	if err != nil {
 		t.Fatalf("parseInvocation(schema): err = %v, want nil", err)
