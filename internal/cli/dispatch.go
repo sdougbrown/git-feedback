@@ -27,7 +27,7 @@ type Invocation = clicontract.Invocation
 // envelope adapts a handler returning the envelope Result to the library's
 // any-returning HandleFunc.
 func envelope(fn func(ctx context.Context, inv Invocation) (Result, error)) clicontract.HandleFunc {
-	return func(ctx context.Context, inv Invocation) (any, error) { return fn(ctx, inv) }
+	return func(ctx context.Context, inv Invocation, _ io.Writer) (any, error) { return fn(ctx, inv) }
 }
 
 // usageError marks a caller error: exit 2 with the error envelope. The
@@ -87,8 +87,8 @@ func buildCommands() []*clicontract.Command {
 			Short:       "export a stored collection to a file",
 			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
-				{Name: "snapshot", Kind: clicontract.String, Usage: "ID of the stored snapshot to export"},
-				{Name: "output", Kind: clicontract.String, Usage: "file path for the exported snapshot JSON"},
+				{Name: "snapshot", Kind: clicontract.String, Usage: "ID of the stored snapshot to export", Required: true},
+				{Name: "output", Kind: clicontract.String, Usage: "file path for the exported snapshot JSON", Required: true},
 			},
 			Handle: envelope(handleSnapshot),
 		},
@@ -97,7 +97,7 @@ func buildCommands() []*clicontract.Command {
 			Short:       "list pending events for a consumer",
 			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
-				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream"},
+				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream", Required: true},
 				{Name: "limit", Kind: clicontract.String, Usage: "maximum events to return (1-200, default 50)", Default: strconv.Itoa(store.DefaultInboxLimit)},
 				{Name: "after", Kind: clicontract.String, Usage: "cursor from a previous inbox page; fetch the next page"},
 				{Name: "ids-only", Kind: clicontract.Bool, Usage: "return event IDs only, without full event records"},
@@ -112,8 +112,8 @@ func buildCommands() []*clicontract.Command {
 			Short:       "acknowledge delivered event IDs",
 			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
-				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream"},
-				{Name: "event", Kind: clicontract.Repeat, Usage: "event ID to acknowledge; repeat the flag for multiple IDs"},
+				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream", Required: true},
+				{Name: "event", Kind: clicontract.Repeat, Usage: "event ID to acknowledge; repeat the flag for multiple IDs, or read IDs from --events-from"},
 				{Name: "events-from", Kind: clicontract.String, Usage: "read event IDs from a file, or - for stdin"},
 			},
 			Handle: envelope(handleAck),
@@ -123,7 +123,7 @@ func buildCommands() []*clicontract.Command {
 			Short:       "fetch one event's stored object content (body, state, comments)",
 			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
-				{Name: "event", Kind: clicontract.String, Usage: "event ID to display"},
+				{Name: "event", Kind: clicontract.String, Usage: "event ID to display", Required: true},
 			},
 			Handle: envelope(handleShow),
 		},
@@ -132,7 +132,7 @@ func buildCommands() []*clicontract.Command {
 			Short:       "block until new events arrive or --timeout elapses (bounded polling)",
 			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
-				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream"},
+				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream", Required: true},
 				{Name: "timeout", Kind: clicontract.String, Usage: "maximum wait duration (default 30m)", Default: waitDefaultTimeout.String()},
 				{Name: "head", Kind: clicontract.String, Usage: "expected head SHA; report head_changed when the observed head no longer matches"},
 				{Name: "limit", Kind: clicontract.String, Usage: "maximum events to return (1-200, default 50)", Default: strconv.Itoa(store.DefaultInboxLimit)},
@@ -351,7 +351,7 @@ func stubHandle(t interface{ Cleanup(func()) }, name string, fn func(ctx context
 	for _, c := range commands {
 		if c.Name == name {
 			old := c.Handle
-			c.Handle = func(ctx context.Context, inv Invocation) (any, error) {
+			c.Handle = func(ctx context.Context, inv Invocation, _ io.Writer) (any, error) {
 				return fn(ctx, inv)
 			}
 			t.Cleanup(func() { c.Handle = old })

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 
@@ -142,7 +143,7 @@ func TestValidatePanicsOnDrift(t *testing.T) {
 	bad := &clicontract.Command{
 		Name:  "bogus",
 		Flags: []clicontract.Flag{{Name: "x", Kind: clicontract.Bool, Usage: "x"}},
-		Handle: func(ctx context.Context, inv Invocation) (any, error) {
+		Handle: func(ctx context.Context, inv Invocation, _ io.Writer) (any, error) {
 			return Result{}, nil
 		},
 	}

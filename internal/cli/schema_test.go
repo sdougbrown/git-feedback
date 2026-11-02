@@ -94,6 +94,9 @@ func TestSchemaCommand(t *testing.T) {
 			if got.Usage != f.Usage {
 				t.Errorf("command %q flag %q: usage = %q, want the declared usage", name, f.Name, got.Usage)
 			}
+			if got.Required != f.Required {
+				t.Errorf("command %q flag %q: required = %v, want %v", name, f.Name, got.Required, f.Required)
+			}
 			if got.Kind != f.Kind.KindSchema() {
 				t.Errorf("command %q flag %q: kind = %q, want %q", name, f.Name, got.Kind, f.Kind.KindSchema())
 			}
