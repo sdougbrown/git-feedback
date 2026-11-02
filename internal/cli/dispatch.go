@@ -74,18 +74,18 @@ var commonFlags = []clicontract.Flag{
 func buildCommands() []*clicontract.Command {
 	return []*clicontract.Command{
 		{
-			Name:  "reconcile",
-			Short: "collect feedback and establish the baseline",
-			URL:   true,
+			Name:        "reconcile",
+			Short:       "collect feedback and establish the baseline",
+			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
 				{Name: "head", Kind: clicontract.String, Usage: "expected head SHA; report head_changed when the observed head no longer matches"},
 			},
 			Handle: envelope(handleReconcile),
 		},
 		{
-			Name:  "snapshot",
-			Short: "export a stored collection to a file",
-			URL:   true,
+			Name:        "snapshot",
+			Short:       "export a stored collection to a file",
+			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
 				{Name: "snapshot", Kind: clicontract.String, Usage: "ID of the stored snapshot to export"},
 				{Name: "output", Kind: clicontract.String, Usage: "file path for the exported snapshot JSON"},
@@ -93,9 +93,9 @@ func buildCommands() []*clicontract.Command {
 			Handle: envelope(handleSnapshot),
 		},
 		{
-			Name:  "inbox",
-			Short: "list pending events for a consumer",
-			URL:   true,
+			Name:        "inbox",
+			Short:       "list pending events for a consumer",
+			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
 				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream"},
 				{Name: "limit", Kind: clicontract.String, Usage: "maximum events to return (1-200, default 50)", Default: strconv.Itoa(store.DefaultInboxLimit)},
@@ -108,9 +108,9 @@ func buildCommands() []*clicontract.Command {
 			Handle: envelope(handleInbox),
 		},
 		{
-			Name:  "ack",
-			Short: "acknowledge delivered event IDs",
-			URL:   true,
+			Name:        "ack",
+			Short:       "acknowledge delivered event IDs",
+			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
 				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream"},
 				{Name: "event", Kind: clicontract.Repeat, Usage: "event ID to acknowledge; repeat the flag for multiple IDs"},
@@ -119,18 +119,18 @@ func buildCommands() []*clicontract.Command {
 			Handle: envelope(handleAck),
 		},
 		{
-			Name:  "show",
-			Short: "fetch one event's stored object content (body, state, comments)",
-			URL:   true,
+			Name:        "show",
+			Short:       "fetch one event's stored object content (body, state, comments)",
+			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
 				{Name: "event", Kind: clicontract.String, Usage: "event ID to display"},
 			},
 			Handle: envelope(handleShow),
 		},
 		{
-			Name:  "wait",
-			Short: "block until new events arrive or --timeout elapses (bounded polling)",
-			URL:   true,
+			Name:        "wait",
+			Short:       "block until new events arrive or --timeout elapses (bounded polling)",
+			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
 			Flags: []clicontract.Flag{
 				{Name: "consumer", Kind: clicontract.String, Usage: "name identifying this reader of the stream"},
 				{Name: "timeout", Kind: clicontract.String, Usage: "maximum wait duration (default 30m)", Default: waitDefaultTimeout.String()},

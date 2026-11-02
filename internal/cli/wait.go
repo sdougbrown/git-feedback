@@ -39,7 +39,7 @@ func handleWait(ctx context.Context, inv Invocation) (Result, error) {
 	}
 
 	res, err := eng.Wait(ctx, tracker.WaitInput{
-		URL:              inv.URL,
+		URL:              inv.Args[0],
 		Head:             inv.Flags["head"],
 		Account:          inv.Flags["account"],
 		Consumer:         consumer,

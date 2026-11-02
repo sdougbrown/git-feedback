@@ -71,8 +71,8 @@ func TestSchemaCommand(t *testing.T) {
 		if cmd.Short != decl.Short {
 			t.Errorf("command %q: short = %q", name, cmd.Short)
 		}
-		if cmd.URL != decl.URL {
-			t.Errorf("command %q: url_positional = %v, want %v", name, cmd.URL, decl.URL)
+		if cmd.URL != (len(decl.Positionals) == 1 && decl.Positionals[0].Required) {
+			t.Errorf("command %q: url_positional = %v", name, cmd.URL)
 		}
 		if len(decl.Subcommands) > 0 {
 			// Flags and subcommands are checked via the nested entries
