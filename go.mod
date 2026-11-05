@@ -3,7 +3,7 @@ module github.com/sdougbrown/git-feedback
 go 1.26.8
 
 require (
-	github.com/sdougbrown/cli-contract v0.4.5
+	github.com/sdougbrown/cli-contract v0.7.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	modernc.org/sqlite v1.50.1
@@ -16,6 +16,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/umpire-tools/umpire-go v0.1.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
