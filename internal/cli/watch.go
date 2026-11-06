@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -9,6 +10,21 @@ import (
 	"github.com/sdougbrown/git-feedback/internal/store"
 	"github.com/sdougbrown/git-feedback/internal/tracker"
 )
+
+func streamWatch(ctx context.Context, inv Invocation, stdout, _ io.Writer) (any, error) {
+	result, err := handleWatch(ctx, inv, stdout)
+	if err != nil {
+		var outputErr *statusError
+		if errors.Is(ctx.Err(), context.Canceled) || (errors.As(err, &outputErr) && outputErr.code == "output_error") {
+			return Result{}, err
+		}
+		result = errorResult(inv.Command, err)
+	}
+	if writeErr := Write(stdout, result); writeErr != nil {
+		return Result{}, writeErr
+	}
+	return result, err
+}
 
 func handleBaseline(ctx context.Context, inv Invocation) (Result, error) {
 	clk := newClock()

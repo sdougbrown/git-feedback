@@ -146,9 +146,7 @@ func buildCommands() []*clicontract.Command {
 				{Name: "skip-head-changed", Kind: clicontract.Bool, Usage: "skip head-change events"},
 				{Name: "stop-on-events", Kind: clicontract.Bool, Usage: "stop after the first event batch"},
 			},
-			Handle: envelope(func(context.Context, Invocation) (Result, error) {
-				return Result{}, &statusError{code: "internal", message: "watch output unavailable"}
-			}),
+			Stream: streamWatch,
 		},
 		{
 			Name:        "wait",
@@ -296,18 +294,7 @@ func (cliAdapter) AfterWrite(inv Invocation, result any, stderr io.Writer) {
 // writes incremental envelopes through stdout and shares the normal handler
 // lifecycle; other commands write one result. Diagnostics go to stderr.
 func Run(argv []string, stdout, stderr io.Writer) int {
-	a := app()
-	a.Commands = append([]*clicontract.Command(nil), a.Commands...)
-	for i, command := range a.Commands {
-		if command.Name == "watch" {
-			copy := *command
-			copy.Handle = func(ctx context.Context, inv Invocation, _ io.Writer) (any, error) {
-				return handleWatch(ctx, inv, stdout)
-			}
-			a.Commands[i] = &copy
-		}
-	}
-	return clicontract.Run(a, cliAdapter{}, argv, stdout, stderr)
+	return clicontract.Run(app(), cliAdapter{}, argv, stdout, stderr)
 }
 
 // parseInvocation parses argv (without the program name) without running

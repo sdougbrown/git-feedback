@@ -18,6 +18,8 @@ github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qq
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/sdougbrown/cli-contract v0.7.1 h1:m6FglLYT61/ZXj7aRyNjM4/BneTzIoVFDRV+wr4jhjE=
 github.com/sdougbrown/cli-contract v0.7.1/go.mod h1:cHm+BfN425jB7st5ziszhVJ4Du96VCnN4sALHchAp/4=
+github.com/sdougbrown/cli-contract v0.9.0 h1:kVRZatZYtBY/6UnWekgwPSS8I/rwjvzs6jlwIiVJzuc=
+github.com/sdougbrown/cli-contract v0.9.0/go.mod h1:cHm+BfN425jB7st5ziszhVJ4Du96VCnN4sALHchAp/4=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
 github.com/spf13/cobra v1.10.2/go.mod h1:7C1pvHqHw5A4vrJfjNwvOdzYu0Gml16OCs2GRiTUUS4=
 github.com/spf13/pflag v1.0.9/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3An2Bg=
