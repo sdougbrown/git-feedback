@@ -139,12 +139,9 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 	if err := validateConsumer(in.Consumer); err != nil {
 		return InboxResult{}, err
 	}
-	limit := in.Limit
-	if limit == 0 {
-		limit = DefaultInboxLimit
-	}
-	if limit < MinInboxLimit || limit > MaxInboxLimit {
-		return InboxResult{}, &Error{Code: CodeInvalidLimit, Message: fmt.Sprintf("limit %d outside %d–%d", limit, MinInboxLimit, MaxInboxLimit)}
+	limit, err := deliveryLimit(in.Limit)
+	if err != nil {
+		return InboxResult{}, err
 	}
 	account := forge.CanonicalAccount(in.Account)
 	streamID, err := s.resolveStream(ctx, in.TargetID, account)
@@ -176,10 +173,64 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 		}
 		highWater, after = c.HighWater, c.After
 	}
+	result, err := s.scanDelivery(ctx, deliveryScan{
+		mode: deliveryInbox, streamID: streamID, after: after, highWater: highWater, limit: limit,
+		consumer: in.Consumer, excludeAuthor: in.ExcludeAuthor,
+		skipEmptyReviews: in.SkipEmptyReviews, skipHeadChanged: in.SkipHeadChanged,
+	})
+	if err != nil {
+		return InboxResult{}, err
+	}
+	if result.HasMore {
+		result.NextCursor, err = encodeCursor(cursor{
+			TargetID: in.TargetID, Account: account, Consumer: in.Consumer,
+			HighWater: highWater, After: result.Events[len(result.Events)-1].Seq,
+		})
+		if err != nil {
+			return InboxResult{}, err
+		}
+	}
+	return result, nil
+}
 
-	where := `WHERE e.stream_id = ? AND e.id > ? AND e.id <= ? AND a.event_id IS NULL`
-	args := []any{in.Consumer, streamID, after, highWater}
-	excludeAuthor := forge.CanonicalAccount(in.ExcludeAuthor)
+type deliveryMode uint8
+
+const (
+	deliveryInbox deliveryMode = iota
+	deliveryStream
+)
+
+type deliveryScan struct {
+	mode                                deliveryMode
+	streamID, after, highWater          int64
+	limit                               int
+	consumer, generation, excludeAuthor string
+	skipEmptyReviews, skipHeadChanged   bool
+}
+
+func deliveryLimit(limit int) (int, error) {
+	if limit == 0 {
+		limit = DefaultInboxLimit
+	}
+	if limit < MinInboxLimit || limit > MaxInboxLimit {
+		return 0, &Error{Code: CodeInvalidLimit, Message: fmt.Sprintf("limit %d outside %d–%d", limit, MinInboxLimit, MaxInboxLimit)}
+	}
+	return limit, nil
+}
+
+func (s *Store) scanDelivery(ctx context.Context, in deliveryScan) (InboxResult, error) {
+	where := `WHERE e.stream_id = ? AND e.id > ? AND e.id <= ?`
+	args := []any{in.streamID, in.after, in.highWater}
+	join := ""
+	if in.mode == deliveryInbox {
+		join = `LEFT JOIN acks a ON a.event_id = e.id AND a.consumer = ? AND a.stream_id = e.stream_id`
+		where += ` AND a.event_id IS NULL`
+		args = append([]any{in.consumer}, args...)
+	} else {
+		where += ` AND EXISTS (SELECT 1 FROM targets t WHERE t.stream_id = e.stream_id AND t.generation = ?)`
+		args = append(args, in.generation)
+	}
+	excludeAuthor := forge.CanonicalAccount(in.excludeAuthor)
 	if excludeAuthor != "" {
 		// Author-less (legacy) events are always delivered; only events whose
 		// author matches the excluded canonical login are filtered out.
@@ -190,14 +241,14 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 	// limit+1 deliverable rows; with one, filtering happens after the scan
 	// (emptiness lives in the snapshot body, skipped kinds cost rows) and the
 	// row limit moves into the scan loop below.
-	filtered := in.SkipEmptyReviews || in.SkipHeadChanged
+	filtered := in.skipEmptyReviews || in.skipHeadChanged
 	if !filtered {
-		args = append(args, limit+1)
+		args = append(args, in.limit+1)
 	}
 	query := `
 		SELECT e.id, e.kind, e.object_kind, e.object_id, e.revision, e.url, e.snapshot_id, e.observed_at, e.head_before, e.head_after, e.author
 		FROM events e
-		LEFT JOIN acks a ON a.event_id = e.id AND a.consumer = ? AND a.stream_id = e.stream_id
+		` + join + `
 		` + where + `
 		ORDER BY e.id ASC`
 	if !filtered {
@@ -209,11 +260,11 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 	}
 	defer rows.Close()
 
-	events := make([]Event, 0, limit)
+	events := make([]Event, 0, in.limit)
 	// Materialize the candidate rows before filtering: the emptiness check
 	// queries snapshot bodies on the same connection, which cannot run while
 	// a row cursor is open.
-	candidates := make([]Event, 0, limit+1)
+	candidates := make([]Event, 0, in.limit+1)
 	for rows.Next() {
 		var ev Event
 		var observedAt string
@@ -241,10 +292,10 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 	reviewContents := map[int64]map[string][2]string{}
 	deliverable := 0
 	for _, ev := range candidates {
-		if in.SkipHeadChanged && ev.Kind == KindHeadChanged && ev.ObjectKind == objectKindTarget {
+		if in.skipHeadChanged && ev.Kind == KindHeadChanged && ev.ObjectKind == objectKindTarget {
 			continue
 		}
-		if in.SkipEmptyReviews {
+		if in.skipEmptyReviews {
 			skip, ferr := s.emptyReviewEvent(ctx, ev, parseSnapshotSeq(ev.SnapshotID), reviewContents)
 			if ferr != nil {
 				return InboxResult{}, ferr
@@ -259,24 +310,15 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 		// once limit+1 deliverable events are in hand (the (limit+1)-th
 		// stays pending and is re-read on the next page, as without the
 		// filter).
-		if filtered && deliverable == limit+1 {
+		if filtered && deliverable == in.limit+1 {
 			break
 		}
 	}
 
-	result := InboxResult{Events: events, HighWater: highWater}
-	if len(events) > limit {
-		result.Events = events[:limit]
+	result := InboxResult{Events: events, HighWater: in.highWater}
+	if len(events) > in.limit {
+		result.Events = events[:in.limit]
 		result.HasMore = true
-	}
-	if result.HasMore {
-		result.NextCursor, err = encodeCursor(cursor{
-			TargetID: in.TargetID, Account: account, Consumer: in.Consumer,
-			HighWater: highWater, After: result.Events[len(result.Events)-1].Seq,
-		})
-		if err != nil {
-			return InboxResult{}, err
-		}
 	}
 	return result, nil
 }

@@ -7,7 +7,7 @@ modes side by side. It is the reference for harnesses that drive
 
 ## Result contract
 
-Every subcommand writes exactly one JSON value to stdout. The exceptions, all
+Every subcommand except continuous `watch` writes exactly one JSON value to stdout. Continuous `watch` writes one envelope per line. The other exceptions, all
 plain JSON or text on stdout with exit 0: `--help` — on the top level (or
 `help`), on the store command, and on every subcommand (`reconcile --help`,
 `wait --help`, `store reset --help`, …); the root `--version` flag; the
@@ -21,7 +21,7 @@ lines to stdout and exits 0. Go types live in
 ```json
 {
   "schema": "git-feedback/v1",
-  "command": "reconcile|snapshot|inbox|show|ack|wait|store",
+  "command": "reconcile|snapshot|inbox|show|ack|wait|baseline|watch|store",
   "status": "updated|unchanged|deferred|busy|head_changed|ok|events|timeout|error",
   "target": {"id": "", "url": "", "forge": "", "host": "", "repo": "", "number": 0},
   "account": "<login>|null",
@@ -111,6 +111,28 @@ identically for both target kinds.
   a usage error (exit 2) naming the stored kind; `store reset --target`
   re-baselines the stream under the other kind.
 
+## Watch position
+
+`baseline` reads a stored snapshot and its matching watch cursor without a
+network request. Reconcile first; the baseline reports the stored freshness.
+The cursor is opaque and bound to target, account, and stream generation. A
+target or full-store reset invalidates it. A restored database copy retains its
+generation and is not recognized as a reset.
+
+`watch --after <cursor>` reads ordered events without consulting or changing
+consumer acknowledgements. Each `events` envelope carries a `next_cursor`,
+including the last page; `has_more` indicates a limit-bound batch. Filters
+change output only: a position can advance past filtered events. Replay an
+earlier cursor to see them under different filters. Reusing a cursor can return
+additional events, but cannot skip events after it.
+
+Continuous watch writes newline-delimited envelopes until stopped or timed
+out. `--stop-on-events` returns one envelope after the first event batch;
+`--timeout` bounds the invocation when supplied. A timeout returns the latest
+emitted cursor, or the input cursor if no batch was emitted. Errors retain the standard envelope and exit code; a terminating
+signal stops the process. Cursor progress is not a delivery receipt or triage
+state. Retain the cursor only after preserving any work required to resume.
+
 ## Inbox cursor
 
 - Cursor is base64url of JSON `{"t":"<Target.ID>","a":"<account>","c":"<consumer>","hw":<seq>,"after":<seq>}`. Bind it to the selected account/target/consumer and validate `0 <= after <= hw <= current stream maximum`. `hw` fixes the sequence's high-water mark; `after` is the last returned seq. Reject malformed or mismatched cursors before reading events.
@@ -177,8 +199,9 @@ delivers the returned events to an agent, then calls `ack` after receipt.
   loop. `inbox` reads unacknowledged events and acknowledges nothing.
 - After the agent receives the delivered events, the controller calls `ack` with
   the exact event IDs to record delivery.
-- The registered tools are `reconcile`, `snapshot`, `inbox`, and `ack`
-  (`examples/cli-registry/git-feedback.json`). `wait` is not registered.
+- The registry manifest also exposes `baseline` and bounded one-shot `watch`
+  alongside `reconcile`, `snapshot`, `inbox`, and `ack`. `wait` and continuous
+  `watch` are not registered.
 
 ### Monitor mode
 

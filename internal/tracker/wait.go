@@ -35,6 +35,8 @@ var errTransientStore = errors.New("tracker: transient store contention")
 // WaitInput selects what wait waits for.
 type WaitInput struct {
 	URL string
+	// Cursor selects ack-independent stream delivery when non-empty.
+	Cursor string
 	// Head pins the delivery: a cycle observing a different head is fatal.
 	Head string
 	// Account is the explicit account; "" lets admitted authentication
@@ -284,18 +286,35 @@ func wakeTime(res Result, rerr error, cycleCut bool, eng *Engine) time.Time {
 func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, account string, in WaitInput) (WaitResult, bool, error) {
 	// The self filter always applies for the cycle's known account (the
 	// only case where backlog runs).
-	page, err := eng.Store.Inbox(ctx, store.InboxInput{
-		TargetID:         target.ID,
-		Account:          account,
-		Consumer:         in.Consumer,
-		Limit:            in.Limit,
-		ExcludeAuthor:    store.SelfExclusionAuthor(account, in.IncludeSelf),
-		SkipEmptyReviews: in.SkipEmptyReviews,
-		SkipHeadChanged:  in.SkipHeadChanged,
-	})
+	var page store.InboxResult
+	var streamCursor string
+	var err error
+	if in.Cursor != "" {
+		var stream store.StreamResult
+		stream, err = eng.Store.ReadStream(ctx, store.StreamInput{
+			TargetID: target.ID, Account: account, Cursor: in.Cursor, Limit: in.Limit,
+			ExcludeAuthor:    store.SelfExclusionAuthor(account, in.IncludeSelf),
+			SkipEmptyReviews: in.SkipEmptyReviews, SkipHeadChanged: in.SkipHeadChanged,
+		})
+		page.Events, page.HasMore = stream.Events, stream.HasMore
+		streamCursor = stream.Cursor
+	} else {
+		page, err = eng.Store.Inbox(ctx, store.InboxInput{
+			TargetID:         target.ID,
+			Account:          account,
+			Consumer:         in.Consumer,
+			Limit:            in.Limit,
+			ExcludeAuthor:    store.SelfExclusionAuthor(account, in.IncludeSelf),
+			SkipEmptyReviews: in.SkipEmptyReviews,
+			SkipHeadChanged:  in.SkipHeadChanged,
+		})
+	}
 	if err != nil {
 		var se *store.Error
 		if errors.As(err, &se) && se.Code == store.CodeUnknownStream {
+			if in.Cursor != "" {
+				return WaitResult{}, false, &store.Error{Code: store.CodeInvalidCursor, Message: "observation stream changed; establish a new baseline"}
+			}
 			return WaitResult{}, false, nil
 		}
 		if isStoreOpenError(err) {
@@ -339,6 +358,9 @@ func (e *Engine) backlog(ctx context.Context, eng *Engine, target forge.Target, 
 		Events:     page.Events,
 		HasMore:    page.HasMore,
 		NextCursor: page.NextCursor,
+	}
+	if in.Cursor != "" {
+		res.NextCursor = streamCursor
 	}
 	if ok {
 		res.Snapshot = &sum

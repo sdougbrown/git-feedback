@@ -18,8 +18,8 @@ Targets:
   --skip-empty-reviews have nothing to act on.
 
 Contract:
-  Every subcommand writes exactly one JSON envelope with a "status" field to
-  stdout; diagnostics go to stderr. Operational errors exit 1, usage errors
+  Every subcommand writes a JSON envelope with a "status" field to stdout;
+  continuous watch writes one per line. Diagnostics go to stderr. Operational errors exit 1, usage errors
   exit 2. Registry and harness callers should key on "status", not the exit
   code. The one exception is opt-in and wait-only: --exit-on-events exits 3
   when it delivers events and 4 when a pinned head moved, so a process
@@ -27,7 +27,7 @@ Contract:
   Full machine contract: docs/contract.md; the parseable interface (commands,
   flags, statuses, exit codes) is git-feedback schema.
 
-inbox and wait exclude events authored by the stream's own account by
+inbox, wait, and watch exclude events authored by the stream's own account by
 default. --include-self opts back in; the legacy --exclude-self spelling is
 accepted as a no-op and reports a deprecation notice on stderr.
 `

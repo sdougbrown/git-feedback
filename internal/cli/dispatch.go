@@ -128,6 +128,27 @@ func buildCommands() []*clicontract.Command {
 			Handle: envelope(handleShow),
 		},
 		{
+			Name:        "baseline",
+			Short:       "read a snapshot and its watch position",
+			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
+			Handle:      envelope(handleBaseline),
+		},
+		{
+			Name:        "watch",
+			Short:       "stream observations after a watch position",
+			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
+			Flags: []clicontract.Flag{
+				{Name: "after", Kind: clicontract.String, Usage: "watch cursor from a baseline or prior batch", Required: true},
+				{Name: "timeout", Kind: clicontract.String, Usage: "maximum watch duration"},
+				{Name: "limit", Kind: clicontract.String, Usage: "maximum events per batch (1-200)", Default: strconv.Itoa(store.DefaultInboxLimit)},
+				{Name: "include-self", Kind: clicontract.Bool, Usage: "include self-authored events"},
+				{Name: "skip-empty-reviews", Kind: clicontract.Bool, Usage: "skip empty review containers"},
+				{Name: "skip-head-changed", Kind: clicontract.Bool, Usage: "skip head-change events"},
+				{Name: "stop-on-events", Kind: clicontract.Bool, Usage: "stop after the first event batch"},
+			},
+			Stream: streamWatch,
+		},
+		{
 			Name:        "wait",
 			Short:       "block until new events arrive or --timeout elapses (bounded polling)",
 			Positionals: []clicontract.Positional{{Name: "URL", Required: true}},
@@ -269,9 +290,9 @@ func (cliAdapter) AfterWrite(inv Invocation, result any, stderr io.Writer) {
 	}
 }
 
-// Run executes one CLI invocation: it parses argv, runs the handler, writes
-// exactly one JSON envelope to stdout, and returns the process exit code.
-// Diagnostics go to stderr.
+// Run executes one CLI invocation and returns its process exit code. Watch
+// writes incremental envelopes through stdout and shares the normal handler
+// lifecycle; other commands write one result. Diagnostics go to stderr.
 func Run(argv []string, stdout, stderr io.Writer) int {
 	return clicontract.Run(app(), cliAdapter{}, argv, stdout, stderr)
 }

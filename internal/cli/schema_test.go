@@ -70,11 +70,11 @@ func TestSchemaCommand(t *testing.T) {
 		if cmd.Short != decl.Short {
 			t.Errorf("command %q: short = %q", name, cmd.Short)
 		}
-		// Independent expectation: the six URL commands take exactly one
+		// Independent expectation: URL commands take exactly one
 		// required positional; nothing else does.
 		wantURL := map[string]bool{
 			"reconcile": true, "snapshot": true, "inbox": true,
-			"ack": true, "show": true, "wait": true,
+			"ack": true, "show": true, "wait": true, "baseline": true, "watch": true,
 		}
 		if cmd.URL != wantURL[name] {
 			t.Errorf("command %q: url_positional = %v, want %v", name, cmd.URL, wantURL[name])
@@ -179,6 +179,8 @@ func TestSchemaCommand(t *testing.T) {
 	}
 	// The exact statuses are the contract; pins use the Status constants.
 	wantStatuses := map[string][]string{
+		"baseline":    {StatusOK},
+		"watch":       {StatusEvents, StatusTimeout},
 		"reconcile":   {StatusUpdated, StatusUnchanged, StatusDeferred, StatusBusy, StatusHeadChange},
 		"snapshot":    {StatusOK},
 		"inbox":       {StatusOK},
@@ -215,7 +217,7 @@ func TestSchemaCommand(t *testing.T) {
 	wantCodes := map[string]bool{
 		"usage": true, "unsupported_host": true, "ambiguous_account": true,
 		"auth": true, "not_found": true, "rate_limited": true,
-		"collection_error": true, "state_dir": true, "internal": true,
+		"collection_error": true, "state_dir": true, "internal": true, "busy": true, "output_error": true,
 		store.CodeStore: true, store.CodeStoreCorrupt: true,
 		store.CodeStoreNewer: true, store.CodeStoreDataOlder: true,
 		store.CodeUnknownStream: true, store.CodeUnknownEvent: true,

@@ -42,8 +42,8 @@ and `--help` on any other subcommand returns a usage error.
   an envelope with `has_more: true`.
 - **Pipe envelopes straight into `ack`.** `--events-from -` accepts a full
   `inbox`/`wait` envelope, event records, or bare IDs.
-- **Key on `status`, not the exit code.** Every subcommand prints one JSON
-  envelope.
+- **Key on `status`, not the exit code.** Every one-shot subcommand prints one
+  JSON envelope; continuous `watch` prints one envelope per line.
 - **Self-filter is on by default.** Your own comments, reviews, and replies are
   not delivered. `--include-self` turns the filter *off* (delivers everything).
   Your own thread resolutions still arrive as a `revision:thread` authored by

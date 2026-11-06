@@ -62,11 +62,13 @@ git-feedback inbox <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR
 git-feedback ack <URL> --consumer <NAME> --event=<ID> [--event=<ID>...] [--events-from -] [--account <LOGIN>] [--state-dir <DIR>] [--json]
 git-feedback show <URL> --event <ID> [--account <LOGIN>] [--state-dir <DIR>] [--json]
 git-feedback wait <URL> --consumer <NAME> [--account <LOGIN>] [--state-dir <DIR>] [--timeout 30m] [--head <SHA>] [--limit 50] [--include-self] [--skip-empty-reviews] [--skip-head-changed] [--exit-on-events] [--json]
+git-feedback baseline <URL> [--account <LOGIN>] [--state-dir <DIR>]
+git-feedback watch <URL> --after <CURSOR> [--stop-on-events] [--timeout 30m] [--limit 50] [--include-self] [--skip-empty-reviews] [--skip-head-changed]
 git-feedback store path [--state-dir <DIR>]
 git-feedback store reset [--target <URL>] [--state-dir <DIR>]
 ```
 
-Every subcommand writes exactly one JSON envelope to stdout (see
+Except for continuous `watch`, every subcommand writes exactly one JSON envelope to stdout (see
 `docs/contract.md`). `--json` is accepted everywhere and is a no-op: output is
 always JSON. Operational errors exit 1 and usage errors exit 2; both still print
 the envelope. `wait --exit-on-events` opts into status-driven codes for process
@@ -98,6 +100,16 @@ monitors: `events` exits 3 and `head_changed` exits 4, while `timeout` stays 0.
   forge API.
 - `wait` — bounded waiting. It owns polling only when used standalone; a
   controller uses `reconcile` and `inbox` instead.
+- `baseline` — return the current stored snapshot and a watch cursor at the
+  same observation boundary. Run `reconcile` first and check freshness before
+  treating that snapshot as a current inventory.
+- `watch` — follow observations after a watch cursor without a consumer or
+  acknowledgements. By default it writes one JSON envelope per line until
+  stopped; `--stop-on-events` returns after the first event batch. `--timeout`
+  optionally bounds either mode. Each batch carries `next_cursor`; retain it
+  after recording anything needed to resume. Reusing an older cursor replays
+  observations, possibly including newer events. An error or timeout is a
+  final envelope. A terminating signal stops the process.
 - `store` — store lifecycle. `store path` prints the resolved store directory
   without opening it. `store reset` deletes the store (the database files in
   the state directory); with `--target <URL>` only that target's streams,
@@ -110,8 +122,8 @@ monitors: `events` exits 3 and `head_changed` exits 4, while `timeout` stays 0.
 An issue URL is a target, not just a pull request URL. Pull requests and issues
 share one number sequence per repository, so a target ID
 (`<forge>:<host>:<repo>:<number>`) stays unique across both, and every
-subcommand — `reconcile`, `snapshot`, `inbox`, `ack`, `show`, `wait`, `store
-reset --target` — works the same way.
+subcommand — `reconcile`, `snapshot`, `inbox`, `ack`, `show`, `wait`, `baseline`,
+`watch`, `store reset --target` — works the same way.
 
 - **Only conversation comments are collected.** An issue has no head, review
   threads, or reviews, so collection reads `/repos/{repo}/issues/{n}/comments`
@@ -205,6 +217,26 @@ sees all history. With `--ids-only`, `events` contains plain event ID strings
 instead of full records — handy for building `ack --event` arguments without
 parsing the full envelope.
 
+### Watch positions
+
+Watch cursors and inbox page cursors are not interchangeable. A watch cursor
+is bound to the target, account, and observation stream generation, and tracks
+an ordered position independently of inbox acknowledgements. Resetting the
+target or store invalidates its cursors; establish a new baseline and inspect
+the snapshot before following it. Stop a running watch before a full store
+reset, then establish a new baseline. A cursor does not record triage or guarantee
+that a receiver handled streamed output. Copies or restored backups of a store
+retain its stream identities and are not detected as resets.
+
+Filtering affects output, not the stream position: once a cursor advances past
+filtered events, replay an earlier cursor without those filters to see them.
+`has_more` means the batch was limited; pass its `next_cursor` to read the
+remainder. `--stop-on-events` exits 0 for both a batch and timeout; inspect
+`status` to distinguish them. A timeout returns the latest emitted cursor, or
+the input cursor if no batch was emitted. Continuous
+watch emits a final timeout envelope when a timeout is supplied; its stdout is
+newline-delimited JSON rather than one JSON document.
+
 `inbox` and `wait` filter out events whose object author is the stream's own
 account by default, so the account's own comments, reviews, and replies do not
 compound the delivery. `--include-self` opts back in and delivers everything;
@@ -275,8 +307,9 @@ appear in stdout, stderr, the database, or snapshot exports.
 
 ## cli-registry integration
 
-`examples/cli-registry/git-feedback.json` registers the one-shot `reconcile`,
-`snapshot`, `inbox`, and `ack` tools (not `wait`). See `docs/contract.md` for the
+`examples/cli-registry/git-feedback.json` registers `reconcile`, `snapshot`,
+`inbox`, `ack`, `baseline`, and a bounded one-shot `watch` (not `wait` or
+continuous watch). See `docs/contract.md` for the
 controller and monitor modes, the monitor loop idiom, and the rationale for
 excluding `wait`. `examples/watch-loop.sh` is a ready-made wrapper that runs
 `wait`, acknowledges the delivered event IDs, and respawns until interrupted —

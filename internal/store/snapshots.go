@@ -162,7 +162,7 @@ func resolveOrCreateStream(ctx context.Context, tx *sql.Tx, in PublishInput, acc
 		return 0, 0, &Error{Code: CodeStore, Message: fmt.Sprintf("marshal target: %v", err)}
 	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO targets (target_id, account, host, target_json) VALUES (?, ?, ?, ?)`,
+		`INSERT INTO targets (target_id, account, host, target_json, generation) VALUES (?, ?, ?, ?, lower(hex(randomblob(16))))`,
 		in.Target.ID, account, forge.CanonicalHost(in.Target.Host), string(tj))
 	if err != nil {
 		return 0, 0, &Error{Code: CodeStore, Message: fmt.Sprintf("create stream: %v", err)}
