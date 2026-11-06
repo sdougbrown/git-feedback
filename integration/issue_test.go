@@ -67,8 +67,11 @@ func TestIssueCursorBaselineAndWatch(t *testing.T) {
 		{"id":33,"user":{"login":"rev"},"body":"ship it","created_at":"2026-01-01T00:02:00Z","html_url":"https://github.com/owner/name/issues/9#issuecomment-33"}
 	]`)
 	batch := runOK(t, env, 60*time.Second, append([]string{"watch", issueURL, "--after", cursor, "--stop-on-events", "--timeout", "30s", "--skip-empty-reviews"}, stateArg(dir)...)...)
-	if statusOf(t, batch) != "events" || len(eventIDs(t, batch)) != 1 {
+	if statusOf(t, batch) != "events" {
 		t.Fatalf("watch = %+v", batch)
+	}
+	if ids := eventObjectIDs(t, batch); len(ids) != 1 || ids[0] != "33" {
+		t.Fatalf("watch object ids = %v, want the post-baseline comment", ids)
 	}
 	if nonNull(batch, "observed_head") {
 		t.Fatalf("watch head = %s, want null", batch["observed_head"])
