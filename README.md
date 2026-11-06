@@ -326,13 +326,14 @@ environments, use an explicit `--state-dir` so each caller selects its own store
 
 ## Agent skill example
 
-`examples/skill/` is a ready-made agent skill (a `SKILL.md` with a recipes
-reference) that drives the pass and watch shapes an autonomous coding agent
-needs: reconcile → inbox → extract the delta → triage → ack, plus a bounded
-`wait` loop for watching a PR. The core guidance is harness-agnostic; the
-frontmatter and `$ARGUMENTS` invocation follow Claude Code conventions, so
-other harnesses need that invocation line adapted. Copy the directory into your
-harness's skill directory and adapt the consumer names to your own conventions.
+`examples/skill/` is a ready-made agent skill with a recipes reference. For
+v0.8.0 and later, it uses `reconcile` and `baseline` to inspect current feedback,
+then a watch cursor to follow changes. For older versions or selective
+acknowledgements, it retains the `inbox`, `ack`, and `wait` workflow. The core
+guidance is harness-agnostic; the frontmatter and `$ARGUMENTS` invocation follow
+Claude Code conventions, so other harnesses need that invocation line adapted.
+Copy the directory into your harness's skill directory and adapt it to your
+own conventions.
 
 ## Registry smoke test
 
