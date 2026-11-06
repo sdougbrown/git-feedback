@@ -49,6 +49,35 @@ func eventObjectIDs(t *testing.T, env map[string]json.RawMessage) []string {
 	return ids
 }
 
+func TestIssueCursorBaselineAndWatch(t *testing.T) {
+	stub := newStub(t)
+	stub.setComments(`[
+		{"id":31,"user":{"login":"rev"},"body":"contract accepted","created_at":"2026-01-01T00:00:00Z","html_url":"https://github.com/owner/name/issues/9#issuecomment-31"}
+	]`)
+	env := testEnv(fakeGHPath(t), stub.srv.URL, map[string]string{"GIT_FEEDBACK_MIN_INTERVAL": "100ms"})
+	dir := testState(t)
+	assertStatusUpdated(t, runOK(t, env, 90*time.Second, issueReconcileArgs(dir)...))
+	baseline := runOK(t, env, 30*time.Second, append([]string{"baseline", issueURL}, stateArg(dir)...)...)
+	if nonNull(baseline, "observed_head") {
+		t.Fatalf("baseline head = %s, want null", baseline["observed_head"])
+	}
+	cursor := stringField(t, baseline, "next_cursor")
+	stub.setComments(`[
+		{"id":31,"user":{"login":"rev"},"body":"contract accepted","created_at":"2026-01-01T00:00:00Z","html_url":"https://github.com/owner/name/issues/9#issuecomment-31"},
+		{"id":33,"user":{"login":"rev"},"body":"ship it","created_at":"2026-01-01T00:02:00Z","html_url":"https://github.com/owner/name/issues/9#issuecomment-33"}
+	]`)
+	batch := runOK(t, env, 60*time.Second, append([]string{"watch", issueURL, "--after", cursor, "--stop-on-events", "--timeout", "30s", "--skip-empty-reviews"}, stateArg(dir)...)...)
+	if statusOf(t, batch) != "events" || len(eventIDs(t, batch)) != 1 {
+		t.Fatalf("watch = %+v", batch)
+	}
+	if nonNull(batch, "observed_head") {
+		t.Fatalf("watch head = %s, want null", batch["observed_head"])
+	}
+	if stringField(t, batch, "next_cursor") == cursor {
+		t.Fatal("watch cursor did not advance")
+	}
+}
+
 // TestIssueTargetEndToEnd: reconcile → wait → ack on an issue URL reads only
 // the conversation comments endpoint, reports null heads, and delivers a
 // newly posted comment as one comment event.

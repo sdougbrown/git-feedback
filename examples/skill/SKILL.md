@@ -43,6 +43,12 @@ running watch, collect and inspect a new baseline, and resume from its cursor.
 Use the same `--state-dir` throughout. When more than one account is stored,
 pass the baseline's `account` to local commands such as `snapshot` and `show`.
 
+Issue targets work the same way. An `/issues/N` URL collects conversation
+comments only: `observed_head` is always null, `head_changed` events never
+appear, and `--skip-head-changed` and `--skip-empty-reviews` have nothing to
+act on. They are accepted and ignored. The default self filter keeps your own
+comments from producing events.
+
 ### First pass: establish the baseline
 
 1. Run `git-feedback reconcile <URL>` and inspect `status`. For `updated` or
