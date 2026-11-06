@@ -94,6 +94,7 @@ func TestRefuseUpgradeWithoutDataVersionTable(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	for _, stmt := range []string{
+		`ALTER TABLE targets DROP COLUMN generation`,
 		`ALTER TABLE events DROP COLUMN author`,
 		`ALTER TABLE objects DROP COLUMN author`,
 		`DROP INDEX snapshots_stream_idx`,

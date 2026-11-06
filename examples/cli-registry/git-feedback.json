@@ -79,6 +79,54 @@
       ],
       "output": { "mode": "json", "success_exit_codes": [0, 1] }
     },
+    "baseline": {
+      "description": "Read the stored snapshot and matching watch cursor. Reconcile and check freshness before treating it as current.",
+      "command": ["git-feedback", "baseline", "--json"],
+      "timeout": "30s",
+      "env": { "HOME": "env:HOME", "PATH": "env:PATH" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "minLength": 1 },
+          "account": { "type": "string" },
+          "state_dir": { "type": "string" }
+        },
+        "required": ["url"],
+        "additionalProperties": false
+      },
+      "bindings": [
+        { "property": "url", "style": "positional" },
+        { "property": "account", "style": "equals", "flag": "--account" },
+        { "property": "state_dir", "style": "equals", "flag": "--state-dir" }
+      ],
+      "output": { "mode": "json", "success_exit_codes": [0, 1] }
+    },
+    "watch": {
+      "description": "Wait up to 30 seconds for one batch after a watch cursor. Inspect status and retain next_cursor after recording the batch.",
+      "command": ["git-feedback", "watch", "--json", "--stop-on-events", "--timeout", "30s"],
+      "timeout": "40s",
+      "env": { "HOME": "env:HOME", "PATH": "env:PATH" },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "minLength": 1 },
+          "after": { "type": "string", "minLength": 1 },
+          "account": { "type": "string" },
+          "state_dir": { "type": "string" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 200 }
+        },
+        "required": ["url", "after"],
+        "additionalProperties": false
+      },
+      "bindings": [
+        { "property": "url", "style": "positional" },
+        { "property": "after", "style": "equals", "flag": "--after" },
+        { "property": "account", "style": "equals", "flag": "--account" },
+        { "property": "state_dir", "style": "equals", "flag": "--state-dir" },
+        { "property": "limit", "style": "equals", "flag": "--limit" }
+      ],
+      "output": { "mode": "json", "success_exit_codes": [0, 1] }
+    },
     "ack": {
       "description": "Acknowledge exactly the supplied event IDs for one target and consumer, transactionally and idempotently.",
       "command": ["git-feedback", "ack", "--json"],

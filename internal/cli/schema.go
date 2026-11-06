@@ -85,6 +85,8 @@ func buildSchema() *SchemaDoc {
 				"show":        {StatusOK},
 				"ack":         {StatusOK},
 				"wait":        {StatusEvents, StatusTimeout, StatusHeadChange},
+				"baseline":    {StatusOK},
+				"watch":       {StatusEvents, StatusTimeout},
 				"store path":  {StatusOK},
 				"store reset": {StatusUpdated, StatusUnchanged},
 			},
@@ -96,7 +98,7 @@ func buildSchema() *SchemaDoc {
 				// CLI-declared codes.
 				"usage", "unsupported_host", "ambiguous_account", "auth",
 				"not_found", "rate_limited", "collection_error", "state_dir",
-				"internal",
+				"internal", "busy", "output_error",
 			},
 				// Store codes that reach the envelope verbatim: mapStoreError
 				// passes operational store errors through under their constant

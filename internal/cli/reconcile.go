@@ -118,7 +118,7 @@ func mapReconcileError(err error) error {
 	var se *store.Error
 	if errors.As(err, &se) {
 		switch se.Code {
-		case store.CodeInvalidConsumer, store.CodeTargetKindMismatch:
+		case store.CodeInvalidConsumer, store.CodeInvalidCursor, store.CodeTargetKindMismatch:
 			// A malformed consumer name or a target kind flip is a
 			// caller mistake, like the identical rejection on inbox/ack
 			// via mapStoreError.

@@ -250,7 +250,7 @@ func TestManifestAckByEvent(t *testing.T) {
 	}
 
 	unknown := runRegistryTool(t, regBin, manifest, stub.srv.URL, "ack",
-		map[string]any{"url": testURL, "consumer": "registry", "event": []string{"evt-unknown"}, "state_dir": dir})
+		map[string]any{"url": testURL, "consumer": "registry", "event": []string{"e99999999"}, "state_dir": dir})
 	requireExit(t, unknown, 1)
 	dec := decodedOf(t, unknown)
 	if s := statusOf(t, dec); s != "error" {

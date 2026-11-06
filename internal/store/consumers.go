@@ -25,9 +25,11 @@ const (
 
 // InboxInput selects one pending-event page for one stream and consumer.
 type InboxInput struct {
-	TargetID string
-	Account  string
-	Consumer string
+	TargetID         string
+	Account          string
+	Consumer         string
+	streamAfter      *int64
+	streamGeneration string
 	// Cursor continues a previous page sequence; empty starts a new sequence
 	// whose high-water mark is the stream's current maximum event seq.
 	Cursor string
@@ -136,8 +138,10 @@ func (s *Store) resolveStream(ctx context.Context, targetID, account string) (in
 // minus that consumer's acknowledgements, ordered ascending, bounded by the
 // page sequence's fixed high-water mark. Reading acknowledges nothing.
 func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
-	if err := validateConsumer(in.Consumer); err != nil {
-		return InboxResult{}, err
+	if in.streamAfter == nil {
+		if err := validateConsumer(in.Consumer); err != nil {
+			return InboxResult{}, err
+		}
 	}
 	limit := in.Limit
 	if limit == 0 {
@@ -153,7 +157,13 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 	}
 
 	var highWater, after int64
-	if in.Cursor == "" {
+	if in.streamAfter != nil {
+		after = *in.streamAfter
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT COALESCE(MAX(id), 0) FROM events WHERE stream_id = ?`, streamID).Scan(&highWater); err != nil {
+			return InboxResult{}, &Error{Code: CodeStore, Message: fmt.Sprintf("read high-water mark: %v", err)}
+		}
+	} else if in.Cursor == "" {
 		if err := s.db.QueryRowContext(ctx,
 			`SELECT COALESCE(MAX(id), 0) FROM events WHERE stream_id = ?`, streamID).Scan(&highWater); err != nil {
 			return InboxResult{}, &Error{Code: CodeStore, Message: fmt.Sprintf("read high-water mark: %v", err)}
@@ -177,8 +187,17 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 		highWater, after = c.HighWater, c.After
 	}
 
-	where := `WHERE e.stream_id = ? AND e.id > ? AND e.id <= ? AND a.event_id IS NULL`
-	args := []any{in.Consumer, streamID, after, highWater}
+	where := `WHERE e.stream_id = ? AND e.id > ? AND e.id <= ?`
+	args := []any{streamID, after, highWater}
+	join := ""
+	if in.streamAfter == nil {
+		join = `LEFT JOIN acks a ON a.event_id = e.id AND a.consumer = ? AND a.stream_id = e.stream_id`
+		where += ` AND a.event_id IS NULL`
+		args = append([]any{in.Consumer}, args...)
+	} else {
+		where += ` AND EXISTS (SELECT 1 FROM targets t WHERE t.stream_id = e.stream_id AND t.generation = ?)`
+		args = append(args, in.streamGeneration)
+	}
 	excludeAuthor := forge.CanonicalAccount(in.ExcludeAuthor)
 	if excludeAuthor != "" {
 		// Author-less (legacy) events are always delivered; only events whose
@@ -197,7 +216,7 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 	query := `
 		SELECT e.id, e.kind, e.object_kind, e.object_id, e.revision, e.url, e.snapshot_id, e.observed_at, e.head_before, e.head_after, e.author
 		FROM events e
-		LEFT JOIN acks a ON a.event_id = e.id AND a.consumer = ? AND a.stream_id = e.stream_id
+		` + join + `
 		` + where + `
 		ORDER BY e.id ASC`
 	if !filtered {
@@ -269,7 +288,7 @@ func (s *Store) Inbox(ctx context.Context, in InboxInput) (InboxResult, error) {
 		result.Events = events[:limit]
 		result.HasMore = true
 	}
-	if result.HasMore {
+	if result.HasMore && in.streamAfter == nil {
 		result.NextCursor, err = encodeCursor(cursor{
 			TargetID: in.TargetID, Account: account, Consumer: in.Consumer,
 			HighWater: highWater, After: result.Events[len(result.Events)-1].Seq,
