@@ -24,6 +24,12 @@ func TestWatchResumesAndReplaysWithoutAck(t *testing.T) {
 	seedPublished(t, env, dir)
 	baseline := runOK(t, env, 30*time.Second, append([]string{"baseline", testURL}, stateArg(dir)...)...)
 	cursor := stringField(t, baseline, "next_cursor")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	mismatch := runCLI(ctx, t, filepath.Join(repoRoot, "bin", "git-feedback-test"), env, append([]string{"watch", testURL, "--after", cursor, "--account", "bob", "--stop-on-events"}, stateArg(dir)...)...)
+	if mismatch.Code != 2 || statusOf(t, mismatch.Env) != "error" || errorCode(t, mismatch.Env) != "usage" {
+		t.Fatalf("account mismatch = %+v", mismatch)
+	}
 	target, err := github.ParseTarget(testURL)
 	if err != nil {
 		t.Fatal(err)
@@ -53,8 +59,6 @@ func TestWatchResumesAndReplaysWithoutAck(t *testing.T) {
 	if statusOf(t, result) != "timeout" {
 		t.Fatalf("resume = %+v", result)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 	streamArgs := append([]string{"watch", testURL, "--after", cursor, "--limit", "1", "--timeout", "200ms"}, stateArg(dir)...)
 	cmd := exec.CommandContext(ctx, filepath.Join(repoRoot, "bin", "git-feedback-test"), streamArgs...)
 	cmd.Env = env
@@ -102,5 +106,10 @@ func TestWatchResumesAndReplaysWithoutAck(t *testing.T) {
 	err = cmd.Wait()
 	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 143 {
 		t.Fatalf("watch signal result = %v, want exit 143", err)
+	}
+	runOK(t, env, 30*time.Second, append([]string{"store", "reset", "--target", testURL}, stateArg(dir)...)...)
+	stale := runCLI(ctx, t, filepath.Join(repoRoot, "bin", "git-feedback-test"), env, append([]string{"watch", testURL, "--after", cursor, "--stop-on-events", "--timeout", "5s"}, stateArg(dir)...)...)
+	if stale.Code != 2 || statusOf(t, stale.Env) != "error" || errorCode(t, stale.Env) != "usage" {
+		t.Fatalf("stale cursor = %+v", stale)
 	}
 }

@@ -199,6 +199,7 @@ func TestMigrationSelfIdentityPreservesRows(t *testing.T) {
 		 VALUES (1, 'thread', 't1', 1, 1, 'fp')`,
 		`INSERT INTO events (stream_id, kind, object_kind, object_id, revision, url, snapshot_id, observed_at)
 		 VALUES (1, 'initial_observation', 'thread', 't1', 1, 'u', 1, '2026-07-01T12:00:00Z')`,
+		`UPDATE targets SET current_snapshot_id = 1 WHERE stream_id = 1`,
 	}
 	for _, q := range seed {
 		if _, err := db.Exec(q); err != nil {
@@ -237,6 +238,14 @@ func TestMigrationSelfIdentityPreservesRows(t *testing.T) {
 	}
 	if len(pending.Events) != 1 || pending.Events[0].ID != "e1" {
 		t.Fatalf("pending events = %+v, want e1", pending.Events)
+	}
+	baseline, err := st.StreamBaseline(context.Background(), "github:github.com:owner/name:7", "alice")
+	if err != nil {
+		t.Fatalf("baseline after upgrade: %v", err)
+	}
+	page, err := st.ReadStream(context.Background(), StreamInput{TargetID: "github:github.com:owner/name:7", Account: "alice", Cursor: baseline.Cursor})
+	if err != nil || len(page.Events) != 0 {
+		t.Fatalf("resume after upgrade: %+v, %v", page, err)
 	}
 }
 

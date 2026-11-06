@@ -77,6 +77,19 @@ func StreamCursorAccount(raw, targetID string) (string, error) {
 	return c.Account, err
 }
 
+func (s *Store) verifyStreamGeneration(ctx context.Context, c streamCursor) (int64, error) {
+	var streamID int64
+	var generation string
+	err := s.db.QueryRowContext(ctx, `SELECT stream_id, generation FROM targets WHERE target_id = ? AND account = ?`, c.Target, c.Account).Scan(&streamID, &generation)
+	if err == sql.ErrNoRows || (err == nil && generation != c.Generation) {
+		return 0, &Error{Code: CodeInvalidCursor, Message: "observation stream changed; establish a new baseline"}
+	}
+	if err != nil {
+		return 0, &Error{Code: CodeStore, Message: fmt.Sprintf("read stream identity: %v", err)}
+	}
+	return streamID, nil
+}
+
 func (s *Store) ReadStream(ctx context.Context, in StreamInput) (StreamResult, error) {
 	c, err := parseStreamCursor(in.Cursor, in.TargetID)
 	if err != nil {
@@ -85,24 +98,28 @@ func (s *Store) ReadStream(ctx context.Context, in StreamInput) (StreamResult, e
 	if c.Account != forge.CanonicalAccount(in.Account) {
 		return StreamResult{}, &Error{Code: CodeInvalidCursor, Message: "invalid watch cursor for account"}
 	}
-	var generation string
-	err = s.db.QueryRowContext(ctx, `SELECT generation FROM targets WHERE target_id = ? AND account = ?`, c.Target, c.Account).Scan(&generation)
-	if err == sql.ErrNoRows || (err == nil && generation != c.Generation) {
-		return StreamResult{}, &Error{Code: CodeInvalidCursor, Message: "observation stream changed; establish a new baseline"}
-	}
-	if err != nil {
-		return StreamResult{}, &Error{Code: CodeStore, Message: fmt.Sprintf("read stream identity: %v", err)}
-	}
-	page, err := s.Inbox(ctx, InboxInput{TargetID: in.TargetID, Account: in.Account, Limit: in.Limit, streamAfter: &c.After, streamGeneration: c.Generation, ExcludeAuthor: in.ExcludeAuthor, SkipEmptyReviews: in.SkipEmptyReviews, SkipHeadChanged: in.SkipHeadChanged})
+	limit, err := deliveryLimit(in.Limit)
 	if err != nil {
 		return StreamResult{}, err
 	}
-	err = s.db.QueryRowContext(ctx, `SELECT generation FROM targets WHERE target_id = ? AND account = ?`, c.Target, c.Account).Scan(&generation)
-	if err == sql.ErrNoRows || (err == nil && generation != c.Generation) {
-		return StreamResult{}, &Error{Code: CodeInvalidCursor, Message: "observation stream changed; establish a new baseline"}
-	}
+	streamID, err := s.verifyStreamGeneration(ctx, c)
 	if err != nil {
-		return StreamResult{}, &Error{Code: CodeStore, Message: fmt.Sprintf("read stream identity: %v", err)}
+		return StreamResult{}, err
+	}
+	var highWater int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM events WHERE stream_id = ?`, streamID).Scan(&highWater); err != nil {
+		return StreamResult{}, &Error{Code: CodeStore, Message: fmt.Sprintf("read high-water mark: %v", err)}
+	}
+	page, err := s.scanDelivery(ctx, deliveryScan{
+		mode: deliveryStream, streamID: streamID, after: c.After, highWater: highWater, limit: limit,
+		generation: c.Generation, excludeAuthor: in.ExcludeAuthor,
+		skipEmptyReviews: in.SkipEmptyReviews, skipHeadChanged: in.SkipHeadChanged,
+	})
+	if err != nil {
+		return StreamResult{}, err
+	}
+	if _, err := s.verifyStreamGeneration(ctx, c); err != nil {
+		return StreamResult{}, err
 	}
 	if c.After > page.HighWater {
 		return StreamResult{}, &Error{Code: CodeInvalidCursor, Message: "cursor is ahead of stream; establish a new baseline"}
