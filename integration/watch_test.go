@@ -59,7 +59,10 @@ func TestWatchResumesAndReplaysWithoutAck(t *testing.T) {
 	if statusOf(t, result) != "timeout" {
 		t.Fatalf("resume = %+v", result)
 	}
-	streamArgs := append([]string{"watch", testURL, "--after", cursor, "--limit", "1", "--timeout", "200ms"}, stateArg(dir)...)
+	if got := stringField(t, result, "next_cursor"); got != next {
+		t.Fatalf("timeout cursor = %q, want %q", got, next)
+	}
+	streamArgs := append([]string{"watch", testURL, "--after", cursor, "--limit", "1", "--timeout", "2s"}, stateArg(dir)...)
 	cmd := exec.CommandContext(ctx, filepath.Join(repoRoot, "bin", "git-feedback-test"), streamArgs...)
 	cmd.Env = env
 	output, err := cmd.Output()

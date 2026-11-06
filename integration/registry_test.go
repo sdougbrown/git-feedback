@@ -8,6 +8,7 @@ package integration
 // forwards the testhook overrides.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +17,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sdougbrown/git-feedback/internal/forge"
+	"github.com/sdougbrown/git-feedback/internal/github"
+	"github.com/sdougbrown/git-feedback/internal/store"
 )
 
 // registryBin returns the reference cli-registry binary, skipping the test
@@ -227,6 +232,44 @@ func TestManifestControllerReplay(t *testing.T) {
 	requireExit(t, again, 0)
 	if got := eventIDs(t, decodedOf(t, again)); len(got) != 0 {
 		t.Fatalf("second inbox still pending: %v", got)
+	}
+}
+
+func TestManifestWatchAfterBaseline(t *testing.T) {
+	regBin, manifest := registrySetup(t)
+	stub := newStub(t)
+	dir := testState(t)
+	rec := runRegistryTool(t, regBin, manifest, stub.srv.URL, "reconcile", map[string]any{"url": testURL, "state_dir": dir})
+	requireExit(t, rec, 0)
+	if statusOf(t, decodedOf(t, rec)) != "updated" {
+		t.Fatalf("reconcile = %+v", rec)
+	}
+	baseline := runRegistryTool(t, regBin, manifest, stub.srv.URL, "baseline", map[string]any{"url": testURL, "state_dir": dir})
+	requireExit(t, baseline, 0)
+	cursor := stringField(t, decodedOf(t, baseline), "next_cursor")
+	target, err := github.ParseTarget(testURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(dir, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.Publish(context.Background(), store.PublishInput{Target: target, Account: "alice", Snapshot: &forge.Snapshot{Head: "h1", HasHead: true, Comments: []forge.Comment{{ID: "registry-watch", Author: "reviewer", Body: "feedback"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	watch := runRegistryTool(t, regBin, manifest, stub.srv.URL, "watch", map[string]any{"url": testURL, "state_dir": dir, "after": cursor})
+	requireExit(t, watch, 0)
+	batch := decodedOf(t, watch)
+	if statusOf(t, batch) != "events" || len(eventIDs(t, batch)) == 0 {
+		t.Fatalf("watch = %+v", batch)
+	}
+	if next := stringField(t, batch, "next_cursor"); next == cursor {
+		t.Fatal("watch cursor did not advance")
 	}
 }
 
