@@ -1,6 +1,6 @@
 ---
 name: git-feedback
-description: "Operate the git-feedback CLI to collect PR review feedback, read only what changed since the last pass, watch a PR for new feedback, and acknowledge delivered events. Use when a task needs PR review threads, reviews, or top-level comments; when watching a PR for reviewer activity; or when the user says 'check for new feedback', 'watch this PR', 'what changed on the PR', or mentions git-feedback. git-feedback is read-only toward GitHub: it does not post replies or resolve threads."
+description: "Operate the git-feedback CLI to collect PR or issue feedback, read changes since the last pass, and watch for new activity. Use when a task needs PR review threads, reviews, or comments; when watching a PR or issue; or when the user says 'check for new feedback', 'watch this PR', 'what changed on the PR', or mentions git-feedback. git-feedback is read-only toward GitHub: it does not post replies or resolve threads."
 argument-hint: '[PR or issue URL]'
 compatibility: "Requires git-feedback 0.5.0 or later on PATH and an authenticated gh. Falls back to the forge API (gh pr view / gh api) when unavailable."
 ---
@@ -9,29 +9,125 @@ $ARGUMENTS: a PR or issue URL.
 
 `git-feedback` collects a PR's review threads, reviews, and top-level comments
 — or an issue's conversation comments — into immutable snapshots and delivers
-per-object change events to named consumers. It is read-only toward GitHub.
+per-object change events. It is read-only toward GitHub.
 Machine contract:
 `docs/contract.md` in the git-feedback repository; read it only when an
 envelope field below is not enough.
 
 ## Version gate
 
-Check that `git-feedback --version` reports 0.5.0 or later. A non-semver version
-string (for example `git-feedback dev` from a source build) counts as present.
-If the version is older, or the store directory is not writable, fetch the same
-data through the forge API
-(`gh pr view --json reviews,comments`, `gh api`) and keep the same
-triage-before-reply discipline by hand.
+Check `git-feedback --version` and select one path:
 
-One flag has a floor of its own: `wait --exit-on-events` needs 0.7.0 or later.
-On an older binary, leave it off and key on the envelope `status` instead —
-every other step in this skill works unchanged.
+- **0.8.0 or later:** use the cursor path below. The inbox/ack path remains
+  available when a consumer needs selective or out-of-order acknowledgements.
+- **0.5.0 through 0.7.x:** use the legacy inbox/ack path below. The optional
+  `wait --exit-on-events` flag requires 0.7.0 or later.
+- **Non-semver build** (for example `git-feedback dev`): inspect
+  `git-feedback schema`. Use the cursor path only if both `baseline` and
+  `watch` are listed; otherwise use the legacy path if it is available.
+- **Older, unavailable, or unwritable store:** fetch the complete inventory
+  through the forge API. Paginate review threads and each thread's nested
+  comments, reviews, and top-level comments; `gh pr view` alone is not a
+  complete thread inventory. Keep the same triage-before-reply discipline.
 
 Help exists at the top level (`git-feedback --help`) and on the `store`
-command (`git-feedback store --help`). Git intercepts `git feedback --help`,
-and `--help` on any other subcommand returns a usage error.
+command (`git-feedback store --help`). Git intercepts `git feedback --help`.
 
-## Rules that always apply
+## Cursor path: 0.8.0 and later
+
+The cursor is a position in the observation stream, not a delivery receipt or
+triage decision. Keep a durable cursor for each target and independent reader;
+do not share one mutable position between a watcher and a pass. Watch cursors
+are not inbox pagination cursors. A reset invalidates the cursor; stop any
+running watch, collect and inspect a new baseline, and resume from its cursor.
+Use the same `--state-dir` throughout. When more than one account is stored,
+pass the baseline's `account` to local commands such as `snapshot` and `show`.
+
+Issue targets work the same way. An `/issues/N` URL collects conversation
+comments only: `observed_head` is always null, `head_changed` events never
+appear, and `--skip-head-changed` and `--skip-empty-reviews` have nothing to
+act on. They are accepted and ignored. The default self filter keeps your own
+comments from producing events.
+
+### First pass: establish the baseline
+
+1. Run `git-feedback reconcile <URL>` and inspect `status`. For `updated` or
+   `unchanged`, continue. For `deferred`, continue only with a complete,
+   non-stale snapshot; otherwise retry at `attempt.next_due`. For `busy` or
+   `head_changed`, retry. On `error`, report the error; do not assume a partial
+   collection is complete.
+2. Run `git-feedback baseline <URL> > <WORK_DIR>/baseline.json`. Check
+   `status: ok`, `snapshot.complete: true`, and `freshness.stale: false`.
+   If baseline reports `busy`, retry it. Its snapshot ID and `next_cursor`
+   are the matching boundary, even if a concurrent collection changed the
+   snapshot after `reconcile`.
+3. Export the baseline's `snapshot.id` with `git-feedback snapshot <URL>
+   --snapshot <ID> --output <WORK_DIR>/snapshot-<ID>.json`. The output file
+   must not already exist. Inspect the current threads, reviews, and comments;
+   record findings, dispositions, and deferred work in your ledger. Reuse prior
+   decisions to avoid duplicate responses. The snapshot includes self-authored
+   objects, unlike filtered event delivery.
+4. Only after recording that work, persist the baseline's `next_cursor` in
+   durable reader state. Losing it before then is safe: repeat the baseline and
+   inspect it again. Do not treat a new baseline as a way to skip unhandled
+   prior events. A baseline is current state, not a complete historical audit;
+   use the legacy inbox if previously stored events are needed.
+
+   For a file-backed reader, write the cursor to a temporary file and rename it
+   over `<WORK_DIR>/cursor` after the work is durable:
+
+   ```bash
+   jq -er '.next_cursor | select(type == "string" and length > 0)' <WORK_DIR>/baseline.json > <WORK_DIR>/cursor.new && mv <WORK_DIR>/cursor.new <WORK_DIR>/cursor
+   ```
+
+### Subsequent passes and watching
+
+Run a bounded one-shot watch using the saved cursor:
+
+```bash
+git-feedback watch <URL> --after "$(cat <WORK_DIR>/cursor)" --stop-on-events --timeout 30s --limit 200 --skip-empty-reviews > <WORK_DIR>/watch.json
+```
+
+For a background watcher, choose an appropriate longer timeout, such as
+`30m`, and arrange for the harness to deliver the resulting envelope. A
+one-shot watch exits after one batch or the timeout; arm another only while
+monitoring is still needed. A harness that can inspect only process exit codes
+cannot distinguish a batch from a timeout: both exit 0. Use the legacy
+`wait --exit-on-events` path for that harness instead.
+
+| `status` | Action |
+|---|---|
+| `events` | Inspect every event. Use `show --event <ID>` for its object as recorded in that event's snapshot; `not_observed` and target events have no object. Recheck fixes when the head changes. Record actual findings and deferred work before saving `next_cursor`. |
+| `timeout` | No deliverable event arrived in the window. Retain the returned `next_cursor`; it is the input cursor when no batch was emitted. Re-arm only if monitoring is still needed. |
+| `error` | Report `error.code` and `error.message`. For an invalid cursor after a reset, establish and inspect a new baseline. Do not advance on an error. |
+
+When `has_more` is true, handle the batch and continue from its `next_cursor`;
+repeat until caught up. Each batch has a cursor, including the last one. Keep
+the previous cursor until the batch's work is durable: replay is expected if a
+process stops before advancing, and event IDs identify observations across
+replays. A saved cursor does not prove that a response was posted or a finding
+was resolved. After handling a batch, replace the cursor using the same
+temporary-file and rename steps above, reading `next_cursor` from `watch.json`.
+
+Filters affect output, not position. Advancing past filtered events means they
+will not appear from that later cursor; replay an earlier cursor to see them.
+The default excludes self-authored events; `--include-self` includes them.
+`--skip-head-changed` suppresses head-only wakeups but also advances past those
+events. Use it only when another part of the workflow tracks head movement.
+CI checks are separate from feedback: use the repository's CI watch as well.
+
+After replies or resolutions, reconcile again. Accept a closing collection only
+when `attempt.at` is later than the last mutation; a `deferred` result is not
+sufficient. Inspect the closing snapshot for unresolved findings and process
+new events from the saved cursor before claiming coverage. Do not replace that
+cursor with a fresh baseline cursor without inspecting the intervening events.
+
+## Legacy inbox/ack path: 0.5.0 through 0.7.x
+
+The following rules and recipes also apply when a newer caller explicitly
+chooses selective acknowledgements instead of the cursor path.
+
+### Rules
 
 - **The store never refreshes itself.** Every pass and every watch cycle starts
   with `reconcile` or `wait`. A loop that only calls `inbox` sees nothing new.
@@ -57,7 +153,7 @@ and `--help` on any other subcommand returns a usage error.
   side answers with `gh issue comment` — the default self filter keeps your own
   comments from waking you.
 
-## Consumer names
+### Consumer names
 
 A consumer is a named read position, scoped per PR. Names must match
 `^[A-Za-z0-9._-]{1,64}$`. A new name sees the full stored event history —
@@ -70,7 +166,7 @@ events recorded before the consumer existed.
 - A watcher and the pass that handles its batches use different consumers, so
   the pass's acks never hide an edge from the watcher.
 
-## Pass shape: read only what changed
+### Pass shape: read only what changed
 
 1. **Collect.** `git-feedback reconcile <PR_URL> > <LEDGER_DIR>/reconcile.json`
 
@@ -133,7 +229,7 @@ Record `snapshot.id`, `observed_head`, and `attempt.at` in the ledger as
 the fetch identity. (`observed_head` is the reconcile envelope's top-level
 field; the export file's top-level `head` matches it.)
 
-## Watch shape: block until feedback changes
+### Watch shape: block until feedback changes
 
 Run one bounded `wait` as a background process that re-invokes the agent when
 it exits (a background shell task, a monitor, or a scheduler-provided respawn):
